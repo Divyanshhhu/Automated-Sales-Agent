@@ -15,7 +15,7 @@ through outreach, qualification, and demo booking.
 ## Status
 
 **Phase 1 is functionally complete and validated against live data**
-(Apollo, Exa, Tavily, OpenAI) across several real batches of real estate
+(Exa, Tavily, OpenAI) across several real batches of real estate
 developers/brokerages in India. It has an offline test suite (no API keys
 or network needed), ruff + mypy configuration, idempotent evidence
 retrieval (a rerun after a partial failure only re-queries the missing
@@ -28,9 +28,9 @@ of `product_profile.json` that lists every problem at once.
 product_profile.json (product + ICP, human-edited)
         |
         v
-[1] Discovery -- Exa search finds candidate company domains,
-    Apollo's free-tier Enrichment endpoint verifies/enriches each one
-    (deterministic, no LLM)
+[1] Discovery -- one Exa company search per geography finds candidate
+    companies and returns their firmographics (employee count, HQ,
+    description) in the same call (deterministic, no LLM)
         |
         v
 [2] ICP Fit scoring -- weighted rule function over employee count,
@@ -78,8 +78,7 @@ Fill in `.env` with your own keys:
 | Key | Used for | Notes |
 |---|---|---|
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | Memo generation | Defaults to `gpt-6-luna` (cost-efficient tier). `gpt-6-astra` (flagship) is available if quality needs outweigh cost. |
-| `APOLLO_API_KEY` | Company enrichment | Free tier works for the Enrichment endpoint (`/organizations/enrich`) — the Search endpoint is paid-only, which is why discovery goes through Exa+Enrichment instead. Free-tier credits are limited per billing cycle. |
-| `EXA_API_KEY` | Discovery (finding candidate companies) | Free tier: 20,000 requests/month. Chosen over Tavily for discovery specifically because Exa's entity/company search benchmarks meaningfully better on this exact task. |
+| `EXA_API_KEY` | Discovery + company firmographics | Free tier: 20,000 requests/month. Chosen over Tavily for discovery because Exa's company search benchmarks meaningfully better on this task, and its `category="company"` results include structured company data — which replaced a separate Apollo enrichment step whose free-tier credits ran out. |
 | `TAVILY_API_KEY` | Evidence retrieval | Free tier: 1,000 credits/month. Stays on Tavily — better fit for research-style per-signal queries than for company discovery. |
 
 ## Running it
@@ -115,18 +114,18 @@ nothing and never touch `data\pipeline.sqlite`.
 For a batch that finds ~15-20 qualifying companies out of ~30-35
 discovered candidates:
 
-- **Exa**: ~7 discovery searches (one per configured geography) — a few
-  cents, well within the free tier for normal testing volume.
-- **Apollo**: ~1 credit per candidate domain enrichment attempt, whether or
-  not it matches — this is the tightest budget; free-tier credits run out
-  fastest here. A domain-blocklist + content-relevance filter runs before
-  each Apollo call specifically to avoid wasting credits on non-companies.
+- **Exa**: ~7 discovery searches (one per configured geography), ~$0.007
+  each — discovery and enrichment together cost about 5 cents.
 - **Tavily**: 5 searches per qualifying company (one per signal category).
 - **OpenAI**: 1 call per qualifying company, ~$0.01-0.04 each on
   `gpt-6-luna` depending on evidence volume.
 
-Total for a real batch: typically **under $1-2**, mostly OpenAI + Tavily;
-Apollo is $0 unless its free-tier credits are exhausted.
+Total for a real batch: typically **under $1-2**, mostly OpenAI + Tavily.
+
+Known limits of Exa's company data: it has no industry label (the ICP
+scorer matches industry keywords against the description instead), no
+state, and the city is occasionally blank — so location matching leans on
+the country when "India" is one of the configured geographies.
 
 ## Project layout
 
@@ -135,7 +134,7 @@ config/product_profile.json   Product + ICP definition (human-edited)
 src/
   config.py           Loads + validates product_profile.json
   db.py               SQLite schema: companies, evidence_items, memos
-  discovery.py         Exa search + Apollo enrichment, with noise filters
+  discovery.py         Exa company search + firmographics, with noise filters
   exa_client.py        Shared Exa search client
   tavily_client.py      Shared Tavily search client
   icp_scorer.py        Deterministic ICP Fit scoring

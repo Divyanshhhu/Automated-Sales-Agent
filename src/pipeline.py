@@ -24,8 +24,8 @@ def run_pipeline(config_path: str, discover_limit: int = 25) -> None:
     product = config["product"]
 
     print(f"[1/5] Discovering companies matching ICP (up to {discover_limit})...")
-    raw_companies = discover_companies(icp, per_page=discover_limit)
-    company_ids = store_companies(raw_companies)
+    companies = discover_companies(icp, limit=discover_limit)
+    company_ids = store_companies(companies)
     print(f"      Stored {len(company_ids)} companies.")
 
     print("[2/5] Scoring ICP fit (deterministic)...")

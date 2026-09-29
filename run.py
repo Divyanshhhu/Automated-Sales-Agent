@@ -13,6 +13,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
+# Confidence labels contain emoji; Windows falls back to cp1252 when output is
+# piped or redirected to a file, which can't encode them and crashes the run.
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="replace")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))

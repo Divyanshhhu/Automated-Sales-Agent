@@ -1,31 +1,28 @@
-"""Deterministic company discovery: two API calls, no LLM.
+"""Deterministic company discovery: one Exa search per geography, no LLM.
 
-Apollo's paid-only Organization Search would normally do this in one call,
-but that endpoint requires a paid plan. Instead: Exa's neural/entity search
-finds candidate company domains for the ICP's geography/industry (Exa
-benchmarks meaningfully better than Tavily on company-discovery-style
-queries -- see exa_client.py), then Apollo's free-tier Organization
-Enrichment endpoint (single domain lookup) pulls structured firmographic
-data per candidate. Still a fixed, bounded set of queries -- not an
-open-ended agentic search loop.
+Exa's company search (category="company") returns structured firmographics
+-- employee count, headquarters, description -- alongside each result, so a
+single call both finds candidates and enriches them. This replaced a
+separate Apollo enrichment call per domain, whose free-tier credits were the
+tightest budget in the whole pipeline. Still a fixed, bounded set of queries
+-- not an open-ended agentic search loop.
 """
 import json
-import os
+import logging
 from datetime import datetime, timezone
+from typing import TypedDict
 from urllib.parse import urlparse
 
 import requests
 
 from .db import get_connection
 from .exa_client import exa_search
-from .retry import call_with_retry, is_retriable_requests_error
 
-APOLLO_ENRICH_URL = "https://api.apollo.io/api/v1/organizations/enrich"
+logger = logging.getLogger("sales_agent")
 
 # Real estate portals, aggregators, media, and generic platforms that show up
-# in "top real estate developer" searches but are not themselves ICP targets.
-# Every domain below burned an Apollo enrichment credit on a company that was
-# never going to qualify -- confirmed junk from live testing, not a guess.
+# in "top real estate developer" searches but are not themselves ICP targets
+# -- confirmed junk from live testing, not a guess.
 DOMAIN_BLOCKLIST = {
     "wikipedia.org", "linkedin.com", "facebook.com", "twitter.com", "x.com",
     "youtube.com", "instagram.com", "magicbricks.com", "99acres.com",
@@ -45,30 +42,20 @@ DOMAIN_BLOCKLIST = {
     "slideshare.net", "f6s.com", "clutch.co",
 }
 
+# Exa sometimes links a result to its own company profile page
+# (exa.ai/library/organization/...) instead of the company's website. The
+# entity data is still valid, but the domain is Exa's, not the company's.
+EXA_PROFILE_DOMAIN = "exa.ai"
+
 # Content-based signals that a search result is a job board, media outlet, or
 # SaaS product rather than an actual real estate company -- catches junk that
-# isn't on the domain blocklist yet. Checked against the search result's
-# title + snippet before an Apollo credit is spent on it.
+# isn't on the domain blocklist yet.
 NON_COMPANY_CONTENT_MARKERS = (
     "hiring alert", "walk-in interview", "job vacancy", "recruitment",
     "career opportunities", "magazine", "business leaders edition",
     "crm software", "software guide", "erp software", "data intelligence platform",
     "market research platform",
 )
-
-
-def _domain_from_url(url: str) -> str | None:
-    try:
-        netloc = urlparse(url).netloc.lower()
-    except ValueError:
-        return None
-    return netloc[4:] if netloc.startswith("www.") else netloc or None
-
-
-def _looks_like_non_company(result: dict) -> bool:
-    text = f"{result.get('title', '')} {result.get('content', '')}".lower()
-    return any(marker in text for marker in NON_COMPANY_CONTENT_MARKERS)
-
 
 # Fallback for arbitrary off-topic noise a negative blocklist can't anticipate
 # -- one live test returned dictionary sites and entertainment companies
@@ -81,102 +68,148 @@ _RELEVANCE_FALLBACK_TERMS = (
 )
 
 
+class Company(TypedDict):
+    """Normalized company record -- the shape store_companies() persists."""
+
+    id: str
+    name: str
+    domain: str | None
+    employee_count: int | None
+    industry: str | None
+    city: str | None
+    state: str | None
+    country: str | None
+    short_description: str | None
+    raw: dict
+
+
+def _domain_from_url(url: str) -> str | None:
+    try:
+        netloc = urlparse(url).netloc.lower()
+    except ValueError:
+        return None
+    return netloc[4:] if netloc.startswith("www.") else netloc or None
+
+
+def _is_blocked(domain: str) -> bool:
+    # Exact domain or a subdomain of it -- a bare substring check blocked
+    # tatahousing.com (a real ICP target) for containing "housing.com".
+    return any(domain == blocked or domain.endswith("." + blocked) for blocked in DOMAIN_BLOCKLIST)
+
+
+def _result_text(result: dict) -> str:
+    entity = result.get("entity") or {}
+    description = entity.get("description") if isinstance(entity.get("description"), str) else ""
+    return f"{result.get('title', '')} {result.get('content', '')} {description}".lower()
+
+
+def _looks_like_non_company(result: dict) -> bool:
+    text = _result_text(result)
+    return any(marker in text for marker in NON_COMPANY_CONTENT_MARKERS)
+
+
 def _looks_relevant(result: dict, icp: dict) -> bool:
-    text = f"{result.get('title', '')} {result.get('content', '')}".lower()
+    text = _result_text(result)
     keywords = [kw.lower() for kw in icp["industry_keywords"]] + list(_RELEVANCE_FALLBACK_TERMS)
     return any(kw in text for kw in keywords)
 
 
-def find_candidate_domains(icp: dict, max_candidates: int = 25) -> list[str]:
+def _as_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    return None
+
+
+def _as_str(value: object) -> str | None:
+    return (value.strip() or None) if isinstance(value, str) else None
+
+
+def company_from_result(result: dict) -> Company | None:
+    """Maps an Exa result's company entity to a Company, or None if the
+    result carries no usable company entity (i.e. it isn't a company profile).
+    """
+    entity = result.get("entity")
+    if not entity:
+        return None
+    name = _as_str(entity.get("name"))
+    if not name:
+        return None
+
+    domain = _domain_from_url(result.get("url", ""))
+    if domain == EXA_PROFILE_DOMAIN:
+        domain = None
+    workforce = entity.get("workforce")
+    hq = entity.get("headquarters")
+    hq = hq if isinstance(hq, dict) else {}
+
+    return Company(
+        # Domain is the stable identity across reruns; name is the fallback
+        # only when Exa didn't give us the company's own website.
+        id=domain or f"name:{name.lower()}",
+        name=name,
+        domain=domain,
+        employee_count=_as_int(workforce.get("total")) if isinstance(workforce, dict) else None,
+        industry=None,  # Exa returns no industry label; the ICP scorer falls back to the description
+        city=_as_str(hq.get("city")),
+        state=None,  # not provided by Exa
+        country=_as_str(hq.get("country")),
+        short_description=_as_str(entity.get("description")),
+        raw=entity,
+    )
+
+
+def discover_companies(icp: dict, limit: int = 25) -> list[Company]:
     """Fixed, bounded set of searches -- one per geography -- not open-ended.
 
-    Three filters run before a domain ever reaches Apollo (which is where
-    the real cost is): the known-junk blocklist is passed to Exa directly so
-    it's excluded at the source, a content-based check catches job
+    Four filters run on every result: the known-junk domain blocklist
+    (applied here, not sent to Exa -- see exa_client.py), results without a
+    company entity are dropped, a content-based check catches job
     boards/media/SaaS sites that aren't blocklisted by domain yet, and a
     positive relevance check catches arbitrary off-topic noise a blocklist
     can't anticipate.
     """
-    domains: list[str] = []
-    seen = set()
+    companies: list[Company] = []
+    seen: set[str] = set()
     for geography in icp["geographies"]:
-        if len(domains) >= max_candidates:
+        if len(companies) >= limit:
             break
-        for keyword in icp["industry_keywords"][:1]:  # one keyword per geography keeps this bounded
-            query = f"top {keyword} companies in {geography}"
-            try:
-                results = exa_search(
-                    query, num_results=8, category="company", exclude_domains=list(DOMAIN_BLOCKLIST)
-                )
-            except requests.exceptions.RequestException:
-                continue
-            for r in results:
-                domain = _domain_from_url(r.get("url", ""))
-                if not domain or domain in seen:
-                    continue
-                if any(blocked in domain for blocked in DOMAIN_BLOCKLIST):
-                    continue
-                if _looks_like_non_company(r):
-                    continue
-                if not _looks_relevant(r, icp):
-                    continue
-                seen.add(domain)
-                domains.append(domain)
-                if len(domains) >= max_candidates:
-                    break
-    return domains
-
-
-def enrich_domain(domain: str) -> dict | None:
-    api_key = os.environ.get("APOLLO_API_KEY")
-    if not api_key:
-        raise RuntimeError("APOLLO_API_KEY is not set in the environment (.env)")
-
-    def _do_request():
-        resp = requests.get(
-            APOLLO_ENRICH_URL,
-            headers={"x-api-key": api_key},
-            params={"domain": domain},
-            timeout=30,
-        )
-        if resp.status_code == 404:
-            return resp  # not found is a normal outcome, not a failure -- don't retry it
-        resp.raise_for_status()
-        return resp
-
-    resp = call_with_retry(
-        _do_request, is_retriable=is_retriable_requests_error, context=f"Apollo enrich({domain})"
-    )
-    if resp.status_code == 404:
-        return None
-    return resp.json().get("organization")
-
-
-def discover_companies(icp: dict, per_page: int = 25, page: int = 1) -> list[dict]:
-    """Returns a list of enriched organization dicts, same shape downstream
-    code expects regardless of which Apollo endpoint produced them.
-    """
-    domains = find_candidate_domains(icp, max_candidates=per_page)
-    organizations = []
-    for domain in domains:
+        keyword = icp["industry_keywords"][0]  # one keyword per geography keeps this bounded
+        query = f"top {keyword} companies in {geography}"
         try:
-            org = enrich_domain(domain)
+            results = exa_search(query, num_results=8, category="company")
         except requests.exceptions.RequestException:
-            continue  # one domain's enrichment failing shouldn't abort the whole batch
-        if org:
-            organizations.append(org)
-    return organizations
+            continue  # one geography's search failing shouldn't abort the whole batch
+        found_before = len(companies)
+        for r in results:
+            domain = _domain_from_url(r.get("url", ""))
+            if domain and _is_blocked(domain):
+                continue
+            if _looks_like_non_company(r) or not _looks_relevant(r, icp):
+                continue
+            company = company_from_result(r)
+            if company is None or company["id"] in seen:
+                continue
+            seen.add(company["id"])
+            companies.append(company)
+            if len(companies) >= limit:
+                break
+        logger.info(
+            "Discovery %r: %d results, %d with company data, %d new companies kept",
+            geography, len(results), sum(1 for r in results if r.get("entity")),
+            len(companies) - found_before,
+        )
+    return companies
 
 
-def store_companies(raw_companies: list[dict]) -> list[str]:
+def store_companies(companies: list[Company]) -> list[str]:
     """Upsert discovered companies into the DB. Returns list of company_ids stored."""
     conn = get_connection()
-    ids = []
     now = datetime.now(timezone.utc).isoformat()
-    for org in raw_companies:
-        company_id = org.get("id") or org.get("primary_domain") or org.get("name")
-        if not company_id:
-            continue
+    for c in companies:
         conn.execute(
             """
             INSERT INTO companies (
@@ -190,20 +223,11 @@ def store_companies(raw_companies: list[dict]) -> list[str]:
                 short_description=excluded.short_description, raw_json=excluded.raw_json
             """,
             (
-                company_id,
-                org.get("name"),
-                org.get("primary_domain") or org.get("website_url"),
-                org.get("estimated_num_employees"),
-                org.get("industry"),
-                org.get("city"),
-                org.get("state"),
-                org.get("country"),
-                org.get("short_description"),
-                json.dumps(org),
-                now,
+                c["id"], c["name"], c["domain"], c["employee_count"], c["industry"],
+                c["city"], c["state"], c["country"], c["short_description"],
+                json.dumps(c["raw"]), now,
             ),
         )
-        ids.append(company_id)
     conn.commit()
     conn.close()
-    return ids
+    return [c["id"] for c in companies]
