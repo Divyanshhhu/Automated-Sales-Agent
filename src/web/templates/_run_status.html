@@ -1,4 +1,4 @@
-{% set steps = [("discovering", "Discover"), ("scoring", "Score"), ("evidence", "Evidence"), ("memos", "Memos"), ("exporting", "Export")] %}
+{% set steps = [("discovering", "Find companies"), ("scoring", "Score fit"), ("evidence", "Research"), ("memos", "Write summaries"), ("exporting", "Save")] %}
 {% set stage = run.stats.get("stage") %}
 {% set stage_keys = steps | map(attribute=0) | list %}
 {% set current = stage_keys.index(stage) if stage in stage_keys else (stage_keys | length if run.status == "succeeded" else -1) %}
@@ -20,15 +20,16 @@
   <dl class="stats">
     <div><dt>New companies found</dt><dd>{{ s.get("discovered", "–") }}</dd></div>
     <div><dt>Seen before (skipped)</dt><dd>{{ s.get("already_known", "–") }}</dd></div>
-    <div><dt>Match the profile (total)</dt><dd>{{ s.get("qualified", "–") }}</dd></div>
+    <div><dt>Good fits (total)</dt><dd>{{ s.get("qualified", "–") }}</dd></div>
     <div><dt>New matches researched</dt><dd>
       {%- if "qualifying" in s -%}
         {#- runs from before progress tracking have no evidence_done; if they got past evidence, all were done -#}
         {{ s.get("evidence_done", s.qualifying if "evidence_added" in s else 0) }} / {{ s.qualifying }}
       {%- else -%}–{%- endif -%}
     </dd></div>
-    <div><dt>Memos written</dt><dd>{{ s.get("memos_generated", "–") }}</dd></div>
-    <div><dt>Memos failed</dt><dd>{{ s.get("memos_failed", "–") }}</dd></div>
+    <div><dt>Research written</dt><dd>{{ s.get("memos_generated", "–") }}</dd></div>
+    <div><dt>Research failed</dt><dd>{{ s.get("memos_failed", "–") }}</dd></div>
+    <div><dt>Cost</dt><dd>{% if s.get("cost") %}{{ s.cost.total_usd | money }}{% else %}–{% endif %}</dd></div>
   </dl>
 
   {% if run.error %}
@@ -40,18 +41,18 @@
     {% set threshold = run.config.icp.get("min_icp_fit_score", 50) %}
     <div class="notice {% if s.get('memos_generated') %}notice-ok{% else %}notice-info{% endif %}" style="margin-top: 16px">
       {% if s.get("memos_generated") %}
-        {{ s.memos_generated }} new memo{{ "s" if s.memos_generated != 1 }} written.
-        <a href="/review?profile_id={{ run.profile_id }}">Review them →</a>
+        {{ s.memos_generated }} new compan{{ "ies" if s.memos_generated != 1 else "y" }} researched.
+        <a href="/leads?campaign={{ run.profile_id }}&amp;stage=review">Review them →</a>
       {% elif s.get("discovered") == 0 %}
-        No new companies found — every company these searches returned has been seen by this profile before.
+        No new companies found — every company these searches returned has been seen by this campaign before.
         To find more, add locations or change the industry keywords in the
-        <a href="/profiles/{{ run.profile_id }}/edit">profile</a>.
+        <a href="/profiles/{{ run.profile_id }}/edit">campaign</a>.
       {% elif s.get("qualifying") == 0 %}
         Found {{ s.discovered }} new compan{{ "ies" if s.discovered != 1 else "y" }}, but none scored
-        {{ threshold }} or more, so no memos were needed. You can widen the employee range or locations,
-        or lower the minimum score, in the <a href="/profiles/{{ run.profile_id }}/edit">profile</a>.
+        {{ threshold }} or more, so no research was needed. You can widen the employee range or locations,
+        or lower the minimum score, in the <a href="/profiles/{{ run.profile_id }}/edit">campaign</a>.
       {% else %}
-        No new memos were written.
+        No new research was written.
       {% endif %}
     </div>
   {% endif %}

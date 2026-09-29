@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ "Edit " ~ name if profile_id else "New profile" }}{% endblock %}
+{% block title %}{{ "Edit " ~ name if profile_id else "New campaign" }}{% endblock %}
 
 {% macro field_errors(key) %}
   {% if errors.get(key) %}
@@ -7,112 +7,159 @@
   {% endif %}
 {% endmacro %}
 
-{% macro text_field(key, label, help) %}
+{% macro text_field(key, label, help, placeholder="") %}
   <div class="field {% if errors.get(key) %}has-error{% endif %}">
     <label for="{{ key }}">{{ label }}</label>
     {% if help %}<p class="help">{{ help }}</p>{% endif %}
-    <input id="{{ key }}" type="text" name="{{ key }}" value="{{ values.get(key, '') }}">
+    <input id="{{ key }}" type="text" name="{{ key }}" value="{{ values.get(key, '') }}" placeholder="{{ placeholder }}">
     {{ field_errors(key) }}
   </div>
 {% endmacro %}
 
-{% macro area_field(key, label, help, cls="") %}
+{% macro area_field(key, label, help, cls="", rows=3) %}
   <div class="field {% if errors.get(key) %}has-error{% endif %}">
     <label for="{{ key }}">{{ label }}</label>
     {% if help %}<p class="help">{{ help }}</p>{% endif %}
-    <textarea id="{{ key }}" name="{{ key }}" class="{{ cls }}">{{ values.get(key, '') }}</textarea>
+    <textarea id="{{ key }}" name="{{ key }}" class="{{ cls }}" rows="{{ rows }}">{{ values.get(key, '') }}</textarea>
     {{ field_errors(key) }}
   </div>
 {% endmacro %}
 
 {% block content %}
-<h1>{{ "Edit profile" if profile_id else "New profile" }}</h1>
+<div class="page-head">
+  <div>
+    <h1>{{ "Edit campaign" if profile_id else "New campaign" }}</h1>
+    <p class="subhead">A campaign is one thing you sell to one kind of company. Three short steps.</p>
+  </div>
+</div>
 
 {% if errors %}
-  <div class="notice notice-error" role="alert">Please fix the highlighted fields below.</div>
+  <div class="notice notice-error" role="alert">Please fix the highlighted fields — the step with the problem is open.</div>
   {% if errors.get(form_error) %}
     <ul class="errors">{% for e in errors[form_error] %}<li>{{ e }}</li>{% endfor %}</ul>
   {% endif %}
 {% endif %}
 
-<form method="post" action="{{ '/profiles/%d' % profile_id if profile_id else '/profiles' }}">
-  <div class="card">
+<form method="post" action="{{ '/profiles/%d' % profile_id if profile_id else '/profiles' }}" id="campaign-form" style="max-width: 820px">
+  <ol class="wizard-steps js-only" aria-label="Steps">
+    <li><button type="button" data-step="1"><span class="n">STEP 1</span><span class="t">What you sell</span></button></li>
+    <li><button type="button" data-step="2"><span class="n">STEP 2</span><span class="t">Who you target</span></button></li>
+    <li><button type="button" data-step="3"><span class="n">STEP 3</span><span class="t">How you reach out</span></button></li>
+  </ol>
+
+  <section class="card wizard-panel" data-panel="1">
+    <h2 class="no-js-only">1 · What you sell</h2>
     <div class="field {% if errors.get('name') %}has-error{% endif %}">
-      <label for="name">Profile name</label>
-      <p class="help">e.g. "Mumbai mid-size developers". Each profile keeps its own scores and memos.</p>
+      <label for="name">Campaign name</label>
+      <p class="help">e.g. "Mumbai mid-size developers". Each campaign keeps its own leads and research.</p>
       <input id="name" type="text" name="name" value="{{ name }}" required maxlength="100">
       {{ field_errors('name') }}
     </div>
-  </div>
+    {{ text_field('product.name', 'What are you selling?', '') }}
+    {{ area_field('product.description', 'What does it do?', 'One or two sentences. The research uses this to explain why a company needs it.') }}
+    {{ area_field('product.problem_solved', 'What problem does it solve?', '') }}
+    {{ area_field('product.differentiators', 'What makes it different?', 'One per line.') }}
+  </section>
 
-  <div class="card">
-    <h2>Ideal customer</h2>
-    <p class="help muted">Each company is scored out of 100: size 30, location 40, industry 30.</p>
-    {{ area_field('icp.industry_keywords', 'Industry keywords',
-       'One per line. A company earns the 30 industry points if its description contains any of these.') }}
-
+  <section class="card wizard-panel" data-panel="2">
+    <h2 class="no-js-only">2 · Who you target</h2>
+    <p class="help muted" style="margin-top: 0">Every company found gets a fit score out of 100: size 30, location 40, industry 30.</p>
+    {{ area_field('icp.industry_keywords', 'What kind of company?',
+       'One per line — words that appear in their description. Worth 30 of the 100 fit points.') }}
     <div class="field {% if errors.get('icp.employee_range') %}has-error{% endif %}">
-      <label>Employee range</label>
-      <p class="help">30 size points inside the range; 15 if the count is unknown or only slightly outside it.</p>
+      <span class="label">How big? (number of people)</span>
+      <p class="help">Worth 30 points; half if the size is unknown or only slightly outside.</p>
       <div class="field-row">
-        <input aria-label="Minimum employees" type="number" min="0" name="icp.employee_min"
-               value="{{ values.get('icp.employee_min', '') }}" placeholder="Min">
-        <input aria-label="Maximum employees" type="number" min="0" name="icp.employee_max"
-               value="{{ values.get('icp.employee_max', '') }}" placeholder="Max">
+        <input aria-label="Smallest" type="number" min="0" name="icp.employee_min" value="{{ values.get('icp.employee_min', '') }}" placeholder="From">
+        <input aria-label="Largest" type="number" min="0" name="icp.employee_max" value="{{ values.get('icp.employee_max', '') }}" placeholder="To">
       </div>
       {{ field_errors('icp.employee_range') }}
     </div>
+    {{ area_field('icp.geographies', 'Where?',
+       'One city or country per line. Worth 40 points. A country matches every company in it, and each location is one search.') }}
+    {{ area_field('icp.roles', 'Who do you want to talk to?', 'One job title per line. Used to find contacts at approved companies.') }}
+  </section>
 
-    {{ area_field('icp.geographies', 'Locations',
-       'One per line. 40 location points if the headquarters city or country matches. Including a country (e.g. "India") matches every company in it.') }}
+  <section class="card wizard-panel" data-panel="3">
+    <h2 class="no-js-only">3 · How you reach out</h2>
+    {{ text_field('outreach.sender_name', 'Your name', 'Signs the email when there is no signature.', '[Your name]') }}
+    {{ area_field('outreach.signature', 'Email signature', 'Name, title, company, phone — added to the end of every email.') }}
+    {{ text_field('outreach.cta_url', 'Booking or WhatsApp link (optional)',
+       'Leave empty for now and emails ask for a reply instead. Add Calendly, or your WhatsApp agent link (https://wa.me/…), later — each email adds its own reference code to it.', 'https://') }}
+    {{ text_field('outreach.cta_label', 'Text before the link', 'e.g. "Book a 15-minute walkthrough".') }}
+  </section>
 
+  <details class="card advanced" id="advanced" {% if errors.get('signal_taxonomy') or errors.get('icp.min_icp_fit_score') or errors.get('signals.likely_need_phrases') %}open{% endif %}>
+    <summary>Advanced settings</summary>
+    <p class="help muted">Sensible defaults are already set — most campaigns never need to change these.</p>
     <div class="field {% if errors.get('icp.min_icp_fit_score') %}has-error{% endif %}">
-      <label for="icp.min_icp_fit_score">Minimum score</label>
-      <p class="help">Companies scoring at least this are researched and get a memo. Leave empty for the default (50).</p>
-      <input id="icp.min_icp_fit_score" type="number" min="0" max="100" step="any" name="icp.min_icp_fit_score"
-             value="{{ values.get('icp.min_icp_fit_score', '') }}">
+      <label for="icp.min_icp_fit_score">Minimum fit score</label>
+      <p class="help">Companies scoring at least this are researched. Leave empty for 50.</p>
+      <input id="icp.min_icp_fit_score" type="number" min="0" max="100" step="any" name="icp.min_icp_fit_score" value="{{ values.get('icp.min_icp_fit_score', '') }}">
       {{ field_errors('icp.min_icp_fit_score') }}
     </div>
-
-    {{ area_field('icp.roles', 'Roles to contact',
-       'One per line. Outreach drafts will be addressed to these roles.') }}
-    {{ area_field('icp.industries', 'Industries (for your reference)',
-       'One per line. Not used in scoring — the keywords above are.') }}
-  </div>
-
-  <div class="card">
-    <h2>Product</h2>
-    <p class="help muted">The memo writer uses the name, description, problem and differentiators to explain why each company is a fit.</p>
-    {{ text_field('product.name', 'Product name', '') }}
-    {{ area_field('product.description', 'Description', '') }}
-    {{ area_field('product.problem_solved', 'Problem it solves', '') }}
-    {{ area_field('product.differentiators', 'Differentiators', 'One per line.') }}
-    {{ text_field('product.pricing', 'Pricing (for your reference)', 'Not used by the pipeline yet.') }}
-    {{ area_field('product.competitors', 'Competitors (for your reference)', 'One per line. Not used by the pipeline yet.') }}
-  </div>
-
-  <div class="card">
-    <h2>Outreach emails</h2>
-    <p class="help muted">Used when writing emails from approved memos. All optional — fill them in when you're ready.</p>
-    {{ text_field('outreach.sender_name', 'Your name', 'Signs the email if no signature is set.') }}
-    {{ area_field('outreach.signature', 'Signature', 'e.g. your name, title, company and phone — added at the end of every email.') }}
-    {{ text_field('outreach.cta_url', 'Call-to-action link',
-       'A booking link (e.g. Calendly) now, or your WhatsApp agent link (https://wa.me/…) later. Each email adds its own reference code so you can tell which email a reply came from. Leave empty to ask for a reply instead.') }}
-    {{ text_field('outreach.cta_label', 'Link text', 'e.g. "Book a 15-minute walkthrough". Shown before the link.') }}
-  </div>
-
-  <div class="card">
-    <h2>Evidence searches</h2>
-    {{ area_field('signal_taxonomy', 'Search queries',
-       'One per line as "category_name: query". {company} is replaced with the company name. Only the direct_pain_point category can produce a 🟢 Strong signal.',
-       'tall') }}
+    {{ area_field('signal_taxonomy', 'Research searches',
+       'One per line as "category_name: search". {company} becomes the company name. The direct_pain_point search looks on complaint and review sites and is the only one that can show a Clear need.',
+       'tall', 6) }}
     {{ area_field('signals.likely_need_phrases', 'Signs of a likely need',
-       'One per line. A memo that cites evidence containing one of these phrases is marked 🔵 Likely need — stronger than 🟡 Plausible fit, below 🟢 Strong signal (a direct complaint). Pick phrases that point at the problem your product solves, e.g. "telecaller" or "click-to-whatsapp". Saving re-labels existing memos.') }}
-  </div>
+       'One per line. Research that cites a source containing one of these is marked Likely need. Saving re-labels existing research.', '', 4) }}
+    {{ area_field('icp.industries', 'Industries (for your reference)', 'One per line. Not used in scoring — the keywords in step 2 are.') }}
+    {{ text_field('product.pricing', 'Pricing (for your reference)', 'Not used yet.') }}
+    {{ area_field('product.competitors', 'Competitors (for your reference)', 'One per line. Not used yet.') }}
+  </details>
 
-  <div class="actions">
-    <button class="btn btn-primary" type="submit">Save profile</button>
-    <a class="btn" href="/profiles">Cancel</a>
+  <div class="wizard-nav">
+    <div class="actions">
+      <button class="btn btn-quiet js-only" type="button" data-move="-1">Back</button>
+      <a class="btn btn-quiet" href="/profiles">Cancel</a>
+    </div>
+    <div class="actions">
+      <button class="btn js-only" type="button" data-move="1">Next</button>
+      <button class="btn btn-primary" type="submit" data-submit>{{ "Save changes" if profile_id else "Create campaign" }}</button>
+    </div>
   </div>
 </form>
+
+<script>
+  (function () {
+    var form = document.getElementById("campaign-form");
+    var isNew = {{ "false" if profile_id else "true" }};
+    var panels = form.querySelectorAll(".wizard-panel");
+    var tabs = form.querySelectorAll("[data-step]");
+    var back = form.querySelector('[data-move="-1"]');
+    var next = form.querySelector('[data-move="1"]');
+    var submit = form.querySelector("[data-submit]");
+    var current = 1;
+    document.documentElement.classList.add("js");
+
+    function show(step) {
+      current = Math.max(1, Math.min(panels.length, step));
+      panels.forEach(function (panel) { panel.hidden = Number(panel.dataset.panel) !== current; });
+      tabs.forEach(function (tab) {
+        var on = Number(tab.dataset.step) === current;
+        if (on) { tab.setAttribute("aria-current", "step"); } else { tab.removeAttribute("aria-current"); }
+      });
+      back.style.visibility = current === 1 ? "hidden" : "visible";
+      next.hidden = current === panels.length;
+      // a new campaign is created from the last step; an existing one can be saved from any step
+      submit.hidden = isNew && current !== panels.length;
+    }
+
+    panels.forEach(function (panel) {
+      if (panel.querySelector(".has-error")) {
+        form.querySelector('[data-step="' + panel.dataset.panel + '"]').classList.add("has-error");
+      }
+    });
+    // A required field on a hidden step can't show its error: open that step first.
+    form.addEventListener("invalid", function (event) {
+      var panel = event.target.closest && event.target.closest(".wizard-panel");
+      if (panel && panel.hidden) show(Number(panel.dataset.panel));
+    }, true);
+    tabs.forEach(function (tab) { tab.addEventListener("click", function () { show(Number(tab.dataset.step)); }); });
+    back.addEventListener("click", function () { show(current - 1); });
+    next.addEventListener("click", function () { show(current + 1); });
+    var firstError = form.querySelector(".wizard-panel .has-error");
+    show(firstError ? Number(firstError.closest(".wizard-panel").dataset.panel) : 1);
+  })();
+</script>
 {% endblock %}

@@ -84,24 +84,19 @@ def retrieve_evidence_for_company(
     queries -- evidence fetched for one profile's query never stands in for
     another's.
 
-    Idempotent: categories that already have stored evidence (from an earlier,
-    partially failed run) are skipped rather than re-queried, and the unique
-    index on evidence_items drops any duplicate row that slips through.
+    Idempotent: a category that was already searched for this company --
+    whether or not it kept anything -- is skipped, so a rerun spends credits
+    only on searches that never ran (or failed). The unique index on
+    evidence_items drops any duplicate row that slips through.
 
     Returns the number of new evidence items stored.
     """
+    missing = set(unsearched_categories(profile_id, company_id, signal_taxonomy))
     conn = get_connection()
     now = datetime.now(timezone.utc).isoformat()
-    already_covered = {
-        row["category"]
-        for row in conn.execute(
-            "SELECT DISTINCT category FROM evidence_items WHERE profile_id=? AND company_id=?",
-            (profile_id, company_id),
-        )
-    }
     stored = 0
     for category, query_template in signal_taxonomy.items():
-        if category in already_covered:
+        if category not in missing:
             continue
         query = query_template.format(company=company_name)
         is_pain_point = category == PAIN_POINT_CATEGORY
@@ -120,7 +115,8 @@ def retrieve_evidence_for_company(
                     query, max_results=RESULTS_PER_CATEGORY, time_range="year", include_answer=False
                 )
         except requests.exceptions.RequestException:
-            continue
+            continue  # not recorded as searched, so the next run retries it
+        kept = 0
         for r in results:
             content = r.get("content", "")
             if is_pain_point and not (mentions_company(r, company_name) and _is_genuine_pain_point(content)):
@@ -142,9 +138,37 @@ def retrieve_evidence_for_company(
                 ),
             )
             stored += cursor.rowcount
+            kept += 1
+        conn.execute(
+            """
+            INSERT INTO evidence_searches (profile_id, company_id, category, query, results_kept, searched_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (profile_id, company_id, category) DO UPDATE SET
+                query=excluded.query, results_kept=excluded.results_kept, searched_at=excluded.searched_at
+            """,
+            (profile_id, company_id, category, query, kept, now),
+        )
         conn.commit()  # per category, so a crash mid-company keeps finished categories
     conn.close()
     return stored
+
+
+def unsearched_categories(profile_id: int, company_id: str, signal_taxonomy: dict) -> list[str]:
+    """The profile's signal categories never searched for this company -- e.g.
+    one added to the profile after the company was researched.
+    """
+    conn = get_connection()
+    try:
+        searched = {
+            r["category"]
+            for r in conn.execute(
+                "SELECT category FROM evidence_searches WHERE profile_id=? AND company_id=?",
+                (profile_id, company_id),
+            )
+        }
+    finally:
+        conn.close()
+    return [c for c in signal_taxonomy if c not in searched]
 
 
 def get_evidence_for_company(profile_id: int, company_id: str) -> list[dict]:

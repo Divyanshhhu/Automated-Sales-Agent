@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+{% block content %}
+{% if not campaign %}
+  <h1>Welcome</h1>
+  <p class="subhead">Start by describing what you sell and who you want to sell it to.</p>
+  <div class="card">
+    <h2>Create your first campaign</h2>
+    <p class="muted">A campaign is one product sold to one kind of company. It takes about two minutes.</p>
+    <a class="btn btn-primary" href="/profiles/new">New campaign</a>
+  </div>
+{% else %}
+{% set p = board.pipeline %}
+{% set icp = campaign.config.icp %}
+<div class="page-head">
+  <div>
+    <h1>Your pipeline</h1>
+    <p class="subhead">{{ campaign.name }} campaign · {{ campaign.config.product.name }} for companies of
+      {{ "{:,}".format(icp.employee_range[0]) }}–{{ "{:,}".format(icp.employee_range[1]) }} people in {{ icp.geographies | length }} location{{ "s" if icp.geographies | length != 1 }}</p>
+  </div>
+  {% if campaigns | length > 1 %}
+  <form method="get" action="/" class="inline-form">
+    <div class="field">
+      <label for="campaign-pick">Campaign</label>
+      <select id="campaign-pick" name="campaign" onchange="this.form.submit()">
+        {% for c in campaigns %}<option value="{{ c.id }}" {% if c.id == campaign.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <noscript><button class="btn" type="submit">Show</button></noscript>
+  </form>
+  {% endif %}
+</div>
+
+{% if active_run %}
+  <div class="notice notice-warn" role="status">
+    A search is running for {{ active_run.profile_name }}. <a href="/runs/{{ active_run.id }}">Watch its progress</a>
+  </div>
+{% endif %}
+
+<section class="pipeline" aria-label="Pipeline">
+  <a class="stage-tile" href="/leads?campaign={{ campaign.id }}&amp;stage=all">
+    <span class="label">Found</span><span class="value">{{ p.found }}</span><span class="hint">companies checked</span></a>
+  <a class="stage-tile" href="/leads?campaign={{ campaign.id }}&amp;stage=all">
+    <span class="label">Good fit</span><span class="value">{{ p.good_fit }}</span><span class="hint">fit score {{ icp.get("min_icp_fit_score", 50) }}+</span></a>
+  <a class="stage-tile {% if p.to_review %}stage-tile-hot{% endif %}" href="/leads?campaign={{ campaign.id }}&amp;stage=review">
+    <span class="label">To review</span><span class="value">{{ p.to_review }}</span><span class="hint">waiting for you</span></a>
+  <a class="stage-tile" href="/leads?campaign={{ campaign.id }}&amp;stage=approved">
+    <span class="label">Approved</span><span class="value">{{ p.approved }}</span><span class="hint">worth contacting</span></a>
+  <a class="stage-tile" href="/outreach?profile_id={{ campaign.id }}&amp;status=approved">
+    <span class="label">Emails ready</span><span class="value">{{ p.emails_ready }}</span><span class="hint">approved, not sent</span></a>
+  <a class="stage-tile" href="/outreach?profile_id={{ campaign.id }}&amp;status=sent">
+    <span class="label">Sent</span><span class="value">{{ p.sent }}</span><span class="hint">emails sent</span></a>
+</section>
+
+<div class="home-grid">
+  <section class="card">
+    <h2>What to do next</h2>
+    {% for step in board.next_steps %}
+      <div class="next-step">
+        <span class="num">{{ loop.index }}</span>
+        <div class="text">
+          <div class="title">{{ step.title }}</div>
+          <div class="detail">{{ step.detail }}</div>
+        </div>
+        <a class="btn {% if step.primary %}btn-primary{% endif %}" href="{{ step.href }}">{{ step.button }}</a>
+      </div>
+    {% else %}
+      <p class="muted">You're all caught up. Find more leads to keep the pipeline full.</p>
+    {% endfor %}
+  </section>
+
+  <section class="card" id="find">
+    <h2>Find leads</h2>
+    <p class="muted" style="margin-top: 0">Searches for new companies, researches the good fits and writes a summary for each.
+      Companies this campaign has already seen are skipped.</p>
+    <form method="post" action="/runs">
+      <input type="hidden" name="profile_id" value="{{ campaign.id }}">
+      <div class="field" style="margin-bottom: 0">
+        <label for="limit">How many new companies?</label>
+        <input id="limit" type="number" name="limit" min="1" max="{{ max_limit }}" value="{{ default_limit }}" required
+               hx-get="/estimate" hx-trigger="input changed delay:300ms" hx-target="#estimate" hx-swap="outerHTML">
+      </div>
+      {% with estimate=estimate, count=default_limit %}{% include "_estimate.html" %}{% endwith %}
+      <button class="btn btn-primary btn-block" type="submit"{% if active_run %} disabled title="A search is already running"{% endif %}>Find leads</button>
+    </form>
+    <p class="small muted" style="margin-bottom: 0">Takes a few minutes. You can leave the page — Home shows the results when it's done.</p>
+  </section>
+</div>
+
+<section class="card">
+  <div class="page-head" style="margin-bottom: 8px">
+    <h2 style="margin: 0">Spending this month</h2>
+    <a class="small" href="/runs">All searches</a>
+  </div>
+  <div class="spend">
+    <span>Total <strong>{{ month.total_usd | money }}</strong></span>
+    <span>Research (Tavily) <strong>{{ month.tavily_credits }}</strong> of {{ "{:,}".format(free_credits) }} free credits used</span>
+    <span>AI writing (OpenAI) <strong>{{ month.by_provider.get("openai", 0) | money }}</strong></span>
+    <span>Company search (Exa) <strong>{{ month.by_provider.get("exa", 0) | money }}</strong></span>
+  </div>
+  {% if runs %}
+  <div class="table-wrap" style="margin-top: 16px">
+    <table>
+      <thead><tr><th>Recent searches</th><th>Status</th><th class="num">New companies</th><th class="num">New research</th><th class="num">Cost</th></tr></thead>
+      <tbody>
+        {% for r in runs %}
+        <tr>
+          <td><a href="/runs/{{ r.id }}">{{ r.started_at[:16] | replace("T", " ") }} UTC</a></td>
+          <td><span class="badge badge-{{ r.status }}">{{ r.status }}</span></td>
+          <td class="num">{{ r.stats.get("discovered", "–") }}</td>
+          <td class="num">{{ r.stats.get("memos_generated", "–") }}</td>
+          <td class="num">{% if r.stats.get("cost") %}{{ r.stats.cost.total_usd | money }}{% else %}–{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

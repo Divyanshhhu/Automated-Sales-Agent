@@ -28,12 +28,47 @@ LABELS = {
 }
 # Strongest first -- used for sorting everywhere.
 LEVEL_ORDER = ("strong", "likely", "plausible", "weak")
+# What the UI calls each level. LABELS stay as stored (and in CSV exports) so
+# existing data keeps working; only the words people read changed.
+DISPLAY_NAMES = {
+    "strong": "Clear need",
+    "likely": "Likely need",
+    "plausible": "Possible need",
+    "weak": "No sign yet",
+}
+
+
+def level_of(label: str | None) -> str:
+    """The level key for a stored label; unknown or missing reads as weak."""
+    for level, stored in LABELS.items():
+        if stored == label:
+            return level
+    return "weak"
+
+
+_CATEGORY_NAMES = {
+    "direct_pain_point": "customer complaints",
+    "expansion_launch": "new launches",
+    "hiring_leadership": "hiring",
+    "funding_financial": "sales and funding",
+    "tech_adoption": "tech and tools",
+}
+
+
+def category_label(category: str) -> str:
+    """Plain-language name of a signal category for the UI."""
+    return _CATEGORY_NAMES.get(category, category.replace("_", " "))
 
 
 @dataclass(frozen=True)
 class SignalAssessment:
     level: str  # a LABELS key
     reason: str  # plain-language explanation shown to the reviewer
+    summary: str = ""  # a few words for list rows
+
+    @property
+    def name(self) -> str:
+        return DISPLAY_NAMES[self.level]
 
     @property
     def label(self) -> str:
@@ -70,7 +105,11 @@ def assess_signal(
 
     pain = [e for e in cited_evidence if e["category"] in STRONG_CATEGORIES]
     if pain:
-        return SignalAssessment("strong", f"Cites direct evidence of the problem: {_ids(pain)}.")
+        return SignalAssessment(
+            "strong",
+            f"Cites direct evidence of the problem: {_ids(pain)}.",
+            "Customers complain about slow or missing replies",
+        )
 
     skipped_pain = [e for e in uncited if e["category"] in STRONG_CATEGORIES]
     hint = (
@@ -84,17 +123,20 @@ def assess_signal(
     if likely:
         details = "; ".join(f"E{e['id']} mentions “{hits[0]}”" for e, hits in likely)
         return SignalAssessment(
-            "likely", f"No direct complaints cited, but a strong sign of the need: {details}.{hint}"
+            "likely",
+            f"No direct complaints cited, but a strong sign of the need: {details}.{hint}",
+            f"Mentions “{likely[0][1][0]}”",
         )
 
     if cited_evidence:
-        categories = sorted({e["category"].replace("_", " ") for e in cited_evidence})
+        categories = sorted({category_label(e["category"]) for e in cited_evidence})
         return SignalAssessment(
             "plausible",
             f"Cites general signals only ({', '.join(categories)}); no complaints about responsiveness"
             f" and none of the profile's likely-need phrases in the cited evidence.{hint}",
+            "General signs: " + ", ".join(categories),
         )
-    return SignalAssessment("weak", f"The memo cites no specific evidence.{hint}")
+    return SignalAssessment("weak", f"The memo cites no specific evidence.{hint}", "Nothing specific found")
 
 
 def assign_confidence(evidence_items: list[dict], likely_need_phrases: list[str] | None = None) -> str:

@@ -133,6 +133,14 @@ def test_legacy_database_is_adopted_into_default_profile(legacy_db: Path) -> Non
     conn.close()
 
 
+def test_existing_evidence_counts_as_searched_after_upgrade(legacy_db: Path) -> None:
+    conn = db.get_connection()
+    rows = conn.execute("SELECT category, results_kept FROM evidence_searches").fetchall()
+    conn.close()
+    # the legacy company had expansion evidence, so only that search is marked done
+    assert [(r["category"], r["results_kept"]) for r in rows] == [("expansion_launch", 1)]
+
+
 def test_failed_migration_rolls_back_and_keeps_legacy_data(
     legacy_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

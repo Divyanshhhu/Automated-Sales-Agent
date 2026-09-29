@@ -9,14 +9,14 @@
 
 {% block content %}
 <h1>Outreach emails</h1>
-<p class="muted subhead">Emails written from approved memos. You send them yourself; nothing goes out automatically.</p>
+<p class="subhead">Emails written to people at approved companies. You send them yourself; nothing goes out automatically.</p>
 
 <div class="card">
   <form class="inline-form" method="get" action="/outreach">
     <div class="field">
-      <label for="profile_id">Profile</label>
+      <label for="profile_id">Campaign</label>
       <select id="profile_id" name="profile_id" onchange="this.form.submit()">
-        <option value="">All profiles</option>
+        <option value="">All campaigns</option>
         {% for p in profiles %}
           <option value="{{ p.id }}" {% if p.id == profile_id %}selected{% endif %}>{{ p.name }}</option>
         {% endfor %}
@@ -55,7 +55,7 @@
     </table>
   </div>
   {% else %}
-    <p class="empty">No emails here yet. Approve a memo on the <a href="/review">Review</a> page, find people, then click “Write email”.</p>
+    <p class="empty">No emails here yet. Approve a company on the <a href="/leads">Leads</a> page, find contacts, then click “Write email”.</p>
   {% endif %}
 </div>
 {% endblock %}

@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% block title %}{{ memo.company.name | short }}{% endblock %}
+{% block content %}
+{% set stage = lead.stage if lead else "review" %}
+{% set status = memo.review_status %}
+<p class="small muted" style="margin: 0 0 10px"><a href="/leads?campaign={{ campaign.id }}">Leads</a> / {{ memo.company.name | short }}</p>
+
+<div class="page-head">
+  <div>
+    <h1>{{ memo.company.name | short }}</h1>
+    <div class="chips" style="margin-top: 10px">
+      {% if memo.company.location %}<span class="pill">{{ memo.company.location }}</span>{% endif %}
+      {% if memo.company.employee_count %}<span class="pill">{{ "{:,}".format(memo.company.employee_count) }} people</span>{% endif %}
+      {% if memo.company.domain %}{% set site = ("https://" ~ memo.company.domain) | safe_url %}
+        <span class="pill">{% if site %}<a href="{{ site }}" target="_blank" rel="noopener noreferrer">{{ memo.company.domain }}</a>{% else %}{{ memo.company.domain }}{% endif %}</span>{% endif %}
+      <span class="pill">Campaign: {{ campaign.name }}</span>
+    </div>
+  </div>
+  <div class="shortcut-hint">
+    {% if status in ("pending", "needs_review") %}<kbd>A</kbd> approve · <kbd>R</kbd> not a fit · {% endif %}
+    <kbd>J</kbd> / <kbd>K</kbd> next / previous
+    {% if next_id %}<a href="/leads/{{ next_id }}" data-shortcut="j" hidden>Next</a>{% endif %}
+    {% if prev_id %}<a href="/leads/{{ prev_id }}" data-shortcut="k" hidden>Previous</a>{% endif %}
+  </div>
+</div>
+
+{% if notice %}<div class="notice notice-ok" role="status">{{ notice }}
+  {% if next_memo and request.query_params.get("done") == "approved" %} Next to review: <a href="/leads/{{ next_memo.id }}">{{ next_memo.company.name | short }}</a>{% endif %}</div>{% endif %}
+{% if error %}<div class="notice notice-error" role="alert">{{ error }}</div>{% endif %}
+
+<ol class="progress" aria-label="Progress">
+  {% for step in progress %}
+    <li class="{% if step.done %}done{% elif step.current %}current{% endif %}" {% if step.current %}aria-current="step"{% endif %}>
+      <span class="mark">{% if step.done %}✓{% else %}{{ loop.index }}{% endif %}</span>{{ step.label }}
+    </li>
+  {% endfor %}
+</ol>
+
+<div class="lead-layout">
+  <div>
+    <section class="card">
+      <div class="summary-grid">
+        <div class="inset">
+          <div class="label">Fit</div>
+          <div class="value">{{ lead.fit_word if lead else "" }} · {{ memo.icp_fit_score | round | int if memo.icp_fit_score is not none else "–" }}</div>
+          <div class="why">Size, location and industry against your campaign</div>
+        </div>
+        <div class="inset">
+          <div class="label">Buying signal</div>
+          <div class="value"><span class="dot dot-lg dot-{{ memo.signal.level }}"></span>{{ memo.signal.name }}</div>
+          <div class="why">{{ memo.signal.summary }}</div>
+        </div>
+      </div>
+      <details class="small muted" style="margin: 12px 0 0">
+        <summary style="cursor: pointer">Why this signal?</summary>
+        <p style="margin: 6px 0 0">{{ memo.signal.reason }}</p>
+      </details>
+      {% if banner %}
+      <div class="banner">
+        <div class="text"><strong>{{ banner.title }}</strong>{{ banner.detail }}{% if status == "approved" %} Your approval will need renewing.{% endif %}</div>
+        <form method="post" action="/leads/{{ memo.id }}/update-research">
+          <button class="btn btn-primary" type="submit">Update research</button>
+        </form>
+      </div>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2>Why they might need you</h2>
+      <p class="research">{{ why.html }}</p>
+      <h2 style="margin-top: 22px">How they could use it</h2>
+      <p class="research">{{ use.html }}</p>
+      {% if gaps %}
+      <div class="gaps"><strong>Not shown by the sources:</strong>
+        {% for gap in gaps %}{{ gap }}{% if not loop.last %} {% endif %}{% endfor %}</div>
+      {% endif %}
+      {% if memo.issues %}
+      <div class="notice notice-warn" style="margin: 16px 0 0" role="alert">
+        <strong>Check before approving — {{ memo.issues | length }} sentence(s) without a proper source:</strong>
+        <ul style="margin: 6px 0 0">{% for issue in memo.issues %}<li>{{ issue }}</li>{% endfor %}</ul>
+      </div>
+      {% endif %}
+    </section>
+
+    <details class="card sources" id="sources">
+      <summary>Sources ({{ cited | length }}{% if others %} + {{ others | length }} more found{% endif %})</summary>
+      {% if cited %}
+      <ol>
+        {% for e in cited %}
+          <li id="source-{{ e.number }}">{{ e.fact_text }}
+            <div class="source-meta">{{ e.category | category }}{% if e.source_date %} · {{ e.source_date[:10] }}{% endif %}
+              {% set url = e.source_url | safe_url %}{% if url %} · <a href="{{ url }}" target="_blank" rel="noopener noreferrer">open source</a>{% endif %}</div>
+          </li>
+        {% endfor %}
+      </ol>
+      {% endif %}
+      {% if others %}
+      <h3 style="margin: 20px 0 0">Also found, not used in the research</h3>
+      <ul>
+        {% for e in others %}
+          <li>{% if e.category == "direct_pain_point" %}<span class="tag-new">complaint</span> {% endif %}{{ e.fact_text }}
+            <div class="source-meta">{% if e.source_date %}{{ e.source_date[:10] }}{% endif %}
+              {% set url = e.source_url | safe_url %}{% if url %} · <a href="{{ url }}" target="_blank" rel="noopener noreferrer">open source</a>{% endif %}</div>
+          </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if not banner %}
+      <form method="post" action="/leads/{{ memo.id }}/update-research" style="margin-top: 18px"
+            data-confirm="Rewrite this research from the stored sources? It costs about $0.001 and clears your decision.">
+        <button class="btn btn-quiet btn-small" type="submit">Rewrite research</button>
+      </form>
+      {% endif %}
+    </details>
+  </div>
+
+  <aside class="lead-side">
+    <section class="card card-accent" id="people" style="margin: 0">
+      {% if status in ("pending", "needs_review") %}
+        <h2>Worth contacting?</h2>
+        <form method="post" action="/leads/{{ memo.id }}/decision">
+          <div class="field">
+            <label for="notes">Notes <span class="muted" style="font-weight: 400">(optional)</span></label>
+            <textarea id="notes" name="notes" maxlength="2000" rows="3" placeholder="Why, or what to change">{{ memo.review_notes or "" }}</textarea>
+          </div>
+          <div class="actions">
+            <button class="btn btn-primary" style="flex-grow: 1" type="submit" name="decision" value="approved" data-shortcut="a">Approve</button>
+            <button class="btn btn-danger" style="flex-grow: 1" type="submit" name="decision" value="rejected" data-shortcut="r">Not a fit</button>
+          </div>
+        </form>
+        {% if next_memo %}<p class="small muted" style="margin-bottom: 0">Next up: <a href="/leads/{{ next_memo.id }}">{{ next_memo.company.name | short }}</a></p>{% endif %}
+
+      {% elif status == "rejected" %}
+        <h2>Marked as not a fit</h2>
+        {% if memo.review_notes %}<p class="muted">“{{ memo.review_notes }}”</p>{% endif %}
+        <form method="post" action="/leads/{{ memo.id }}/decision">
+          <input type="hidden" name="decision" value="reset">
+          <button class="btn btn-block" type="submit">Undo</button>
+        </form>
+
+      {% else %}
+        {% if stage == "contacted" %}
+          <h2>Contacted</h2>
+          <p class="muted" style="margin-top: 0">An email has been sent. When they reply or book, its reference code tells you which email it was.</p>
+        {% elif not contacts %}
+          <h2>Approved. Who should you contact?</h2>
+          <p class="muted" style="margin-top: 0">Finds up to 5 people who work there now as {{ roles | join(", ") if roles else "sales leaders" }}. One search, about $0.01.</p>
+        {% else %}
+          <h2>{% if lead and lead.next_step == "Send email" %}Email ready to send{% elif lead and lead.next_step == "Check email" %}Check the email{% else %}Pick who to email{% endif %}</h2>
+        {% endif %}
+
+        {% for c in contacts %}
+          {% set d = drafts.get(c.id) %}
+          <div class="contact">
+            <div class="contact-main">
+              <strong>{{ c.name }}</strong>
+              <div class="small muted">{{ c.title or "" }}{% if c.email %} · {{ c.email }}{% else %} · no email yet{% endif %}
+                {% set profile_link = c.profile_url | safe_url %}{% if profile_link %} · <a href="{{ profile_link }}" target="_blank" rel="noopener noreferrer">profile</a>{% endif %}</div>
+            </div>
+            <div class="actions">
+              {% if d %}
+                <a class="btn btn-small {% if d.status != 'sent' %}btn-primary{% endif %}" href="/drafts/{{ d.id }}">{% if d.status == "draft" %}Check email{% elif d.status == "approved" %}Send email{% else %}Sent ✓{% endif %}</a>
+              {% else %}
+                <form method="post" action="/leads/{{ memo.id }}/contacts/{{ c.id }}/draft">
+                  <button class="btn btn-small btn-primary" type="submit">Write email</button>
+                </form>
+              {% endif %}
+              <details class="inline-details">
+                <summary class="btn btn-small btn-quiet">Edit</summary>
+                <form class="stack" method="post" action="/leads/{{ memo.id }}/contacts/{{ c.id }}" style="margin-top: 8px">
+                  <input type="text" name="name" value="{{ c.name }}" aria-label="Name" required maxlength="200">
+                  <input type="text" name="title" value="{{ c.title or '' }}" aria-label="Title" placeholder="Title" maxlength="200">
+                  <input type="email" name="email" value="{{ c.email or '' }}" aria-label="Email" placeholder="Work email" maxlength="200">
+                  <input type="text" name="profile_url" value="{{ c.profile_url or '' }}" aria-label="Profile link" placeholder="https://…" maxlength="500">
+                  <div class="actions">
+                    <button class="btn btn-small" type="submit">Save</button>
+                  </div>
+                </form>
+                <form method="post" action="/leads/{{ memo.id }}/contacts/{{ c.id }}/delete" style="margin-top: 8px"
+                      data-confirm="Delete {{ c.name }} and any emails written to them?">
+                  <button class="btn btn-small btn-danger" type="submit">Delete person</button>
+                </form>
+              </details>
+            </div>
+          </div>
+        {% endfor %}
+
+        {% if stage != "contacted" %}
+        <form method="post" action="/leads/{{ memo.id }}/find-people" style="margin-top: 12px">
+          <button class="btn btn-block {% if not contacts %}btn-primary{% endif %}" type="submit">{% if contacts %}Find more people{% else %}Find contacts{% endif %}</button>
+        </form>
+        {% endif %}
+        <details class="add-person">
+          <summary>Add someone yourself</summary>
+          <form class="stack" method="post" action="/leads/{{ memo.id }}/contacts">
+            <input type="text" name="name" aria-label="Name" placeholder="Full name" required maxlength="200">
+            <input type="text" name="title" aria-label="Title" placeholder="Title, e.g. Head of Sales" maxlength="200">
+            <input type="email" name="email" aria-label="Email" placeholder="Work email" maxlength="200">
+            <input type="text" name="profile_url" aria-label="Profile link" placeholder="LinkedIn link (optional)" maxlength="500">
+            <button class="btn btn-small" type="submit">Add person</button>
+          </form>
+        </details>
+        {% if contacts %}<p class="small muted" style="margin-bottom: 0">Search doesn't give email addresses — add them with Edit. Only work details are kept.</p>{% endif %}
+        {% if stage != "contacted" %}
+        <form method="post" action="/leads/{{ memo.id }}/decision" style="margin-top: 14px">
+          <input type="hidden" name="decision" value="reset">
+          <button class="btn btn-small btn-quiet" type="submit">Undo approval</button>
+        </form>
+        {% endif %}
+      {% endif %}
+    </section>
+
+    <section class="card" style="margin: 0">
+      <h3>Why the fit score is {{ memo.icp_fit_score | round | int if memo.icp_fit_score is not none else "–" }}</h3>
+      {% if memo.score_breakdown %}
+      <div class="fit-rows">
+        {% for key, label in [("employee", "Size"), ("location", "Location"), ("industry", "Industry")] %}
+          {% set got = memo.score_breakdown.get(key, 0) %}
+          <div class="fit-row"><span>{{ label }}</span><meter min="0" max="{{ weights[key] }}" value="{{ got }}"></meter><span class="pts">{{ got | round | int }} / {{ weights[key] }}</span></div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if memo.current_score is not none and memo.icp_fit_score is not none and memo.current_score != memo.icp_fit_score %}
+        <p class="small muted">Your campaign has changed since this research was written: it now scores {{ memo.current_score | round | int }}.</p>
+      {% endif %}
+    </section>
+  </aside>
+</div>
+<script>
+  // Footnotes point into the Sources section, which starts collapsed: open it first.
+  (function () {
+    var sources = document.getElementById("sources");
+    if (!sources) return;
+    document.addEventListener("click", function (event) {
+      if (event.target.closest && event.target.closest(".fn a")) sources.open = true;
+    });
+    if (location.hash.indexOf("#source-") === 0) sources.open = true;
+  })();
+</script>
+{% endblock %}

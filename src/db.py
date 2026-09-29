@@ -302,11 +302,63 @@ def _migration_3_contacts_and_outreach(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX idx_outreach_drafts_status ON outreach_drafts (status)")
 
 
+def _migration_4_usage_and_searches(conn: sqlite3.Connection) -> None:
+    """- api_usage: one row per paid API call (provider, units, real cost), tagged
+      with the action and campaign it was for, so runs and actions show what they
+      actually cost instead of an estimate.
+    - evidence_searches: which signal searches ran for a company, even ones that
+      kept nothing -- "never checked" and "checked, nothing found" look the same
+      in evidence_items alone. Backfilled from existing evidence, so a category
+      that has evidence counts as searched and one that never did (e.g. the
+      complaint-site search added later) shows up as not yet checked.
+    """
+    conn.execute(
+        """
+        CREATE TABLE api_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            provider TEXT NOT NULL CHECK (provider IN ('exa', 'tavily', 'openai')),
+            units REAL NOT NULL,
+            unit TEXT NOT NULL,
+            cost_usd REAL NOT NULL,
+            action TEXT NOT NULL,
+            profile_id INTEGER REFERENCES profiles (id) ON DELETE SET NULL,
+            run_id INTEGER REFERENCES runs (id) ON DELETE SET NULL,
+            detail TEXT
+        )
+        """
+    )
+    conn.execute("CREATE INDEX idx_api_usage_created ON api_usage (created_at)")
+    conn.execute("CREATE INDEX idx_api_usage_run ON api_usage (run_id)")
+    conn.execute(
+        """
+        CREATE TABLE evidence_searches (
+            profile_id INTEGER NOT NULL REFERENCES profiles (id),
+            company_id TEXT NOT NULL REFERENCES companies (id),
+            category TEXT NOT NULL,
+            query TEXT NOT NULL,
+            results_kept INTEGER NOT NULL,
+            searched_at TEXT NOT NULL,
+            PRIMARY KEY (profile_id, company_id, category)
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO evidence_searches (profile_id, company_id, category, query, results_kept, searched_at)
+        SELECT profile_id, company_id, category, '', COUNT(*), COALESCE(MIN(retrieved_at), ?)
+        FROM evidence_items GROUP BY profile_id, company_id, category
+        """,
+        (utc_now(),),
+    )
+
+
 # Append-only: never edit a migration that has shipped -- add a new one.
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_1_initial_schema,
     _migration_2_profiles,
     _migration_3_contacts_and_outreach,
+    _migration_4_usage_and_searches,
 ]
 
 

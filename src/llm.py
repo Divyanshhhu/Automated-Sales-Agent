@@ -7,6 +7,7 @@ import os
 from openai import APIConnectionError, APITimeoutError, InternalServerError, OpenAI, RateLimitError
 
 from .retry import call_with_retry
+from .usage import record_openai
 
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-6-luna")
 
@@ -30,4 +31,8 @@ def call_structured(
         )
 
     response = call_with_retry(_do_call, is_retriable=is_retriable_openai_error, context=context)
+    usage = getattr(response, "usage", None)
+    record_openai(
+        getattr(usage, "input_tokens", 0) or 0, getattr(usage, "output_tokens", 0) or 0, detail=schema_name
+    )
     return json.loads(response.output_text)

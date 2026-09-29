@@ -11,6 +11,7 @@ import os
 import requests
 
 from .retry import call_with_retry, is_retriable_requests_error
+from .usage import record_exa
 
 EXA_URL = "https://api.exa.ai/search"
 
@@ -50,7 +51,9 @@ def exa_search(
     resp = call_with_retry(
         _do_request, is_retriable=is_retriable_requests_error, context=f"Exa search({query!r})"
     )
-    results = resp.json().get("results", [])
+    data = resp.json()
+    record_exa((data.get("costDollars") or {}).get("total"), detail=f"{category or 'web'}: {query}")
+    results = data.get("results", [])
     # Normalize to the same shape Tavily results use (title/url/content), so
     # the filtering logic in discovery.py doesn't need to know which
     # provider produced a given result. "entity" carries the structured

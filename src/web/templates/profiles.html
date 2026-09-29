@@ -1,13 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Profiles{% endblock %}
+{% block title %}Campaigns{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Profiles</h1>
-  <a class="btn btn-primary" href="/profiles/new">New profile</a>
+  <div>
+    <h1>Campaigns</h1>
+    <p class="subhead">Each campaign is one thing you sell to one kind of company.</p>
+  </div>
+  <a class="btn btn-primary" href="/profiles/new">New campaign</a>
 </div>
 
 {% if request.query_params.get('saved') %}
-  <div class="notice notice-ok" role="status">Profile saved.</div>
+  <div class="notice notice-ok" role="status">Campaign saved.</div>
 {% endif %}
 
 <div class="card">
@@ -18,8 +21,8 @@
         <tr>
           <th>Name</th>
           <th>Locations</th>
-          <th class="num">Employees</th>
-          <th class="num">Min score</th>
+          <th class="num">People</th>
+          <th class="num">Min fit</th>
           <th>Updated</th>
           <th></th>
         </tr>
@@ -35,8 +38,8 @@
           <td class="muted">{{ p.updated_at[:10] }}</td>
           <td>
             <div class="actions">
-              <a class="btn btn-small btn-primary" href="/runs?profile_id={{ p.id }}">Run</a>
-              <a class="btn btn-small" href="/review?profile_id={{ p.id }}">Review</a>
+              <a class="btn btn-small btn-primary" href="/?campaign={{ p.id }}#find">Find leads</a>
+              <a class="btn btn-small" href="/leads?campaign={{ p.id }}">Leads</a>
               <a class="btn btn-small" href="/profiles/{{ p.id }}/edit">Edit</a>
               <form method="post" action="/profiles/{{ p.id }}/duplicate">
                 <button class="btn btn-small" type="submit">Duplicate</button>
@@ -50,12 +53,12 @@
     </table>
   </div>
   {% else %}
-    <p class="empty">No profiles yet. Create one, or import a JSON file below.</p>
+    <p class="empty">No campaigns yet. Create one, or import a JSON file below.</p>
   {% endif %}
 </div>
 
 <div class="card">
-  <h2>Import a profile</h2>
+  <h2>Import a campaign</h2>
   {% if import_error %}
     <div class="notice notice-error" role="alert" style="white-space: pre-line">{{ import_error }}</div>
   {% endif %}

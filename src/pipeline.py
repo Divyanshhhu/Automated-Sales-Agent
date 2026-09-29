@@ -16,6 +16,7 @@ from .icp_scorer import score_companies_for_profile
 from .memo_generator import build_memo
 from .profiles import Profile
 from .runs import complete_run, create_run, fail_run, mark_running, update_stats
+from .usage import run_cost, usage_context
 
 logger = logging.getLogger("sales_agent")
 
@@ -63,6 +64,17 @@ def _qualifying_companies(profile_id: int, threshold: float) -> list:
         conn.close()
 
 
+def _cost_stats(run_id: int) -> dict:
+    """The run's real cost, as stored in its stats for the UI."""
+    cost = run_cost(run_id)
+    return {
+        "total_usd": cost.total_usd,
+        "by_provider": cost.by_provider,
+        "tavily_credits": cost.tavily_credits,
+        "openai_tokens": cost.openai_tokens,
+    }
+
+
 def run_pipeline(profile: Profile, discover_limit: int = 25, *, run_id: int | None = None) -> int:
     """Runs the pipeline for one profile. Returns the run id.
 
@@ -84,75 +96,88 @@ def run_pipeline(profile: Profile, discover_limit: int = 25, *, run_id: int | No
         stats["stage"] = stage
         update_stats(run_id, stats)
 
-    try:
-        checkpoint("discovering")
-        print(f"[1/5] Discovering up to {discover_limit} new companies matching the ICP...")
-        discovery = discover_companies(icp, limit=discover_limit, known_ids=_known_company_ids(profile.id))
-        company_ids = store_companies(discovery.companies)
-        stats["discovered"] = len(company_ids)
-        stats["already_known"] = discovery.already_known
-        print(
-            f"      Found {len(company_ids)} new companies "
-            f"({discovery.already_known} seen before, skipped)."
-        )
+    # Every API call below is recorded against this run, so its real cost is known.
+    with usage_context("find_leads", profile_id=profile.id, run_id=run_id):
+        try:
+            checkpoint("discovering")
+            print(f"[1/5] Discovering up to {discover_limit} new companies matching the ICP...")
+            known = _known_company_ids(profile.id)
+            discovery = discover_companies(icp, limit=discover_limit, known_ids=known)
+            company_ids = store_companies(discovery.companies)
+            stats["discovered"] = len(company_ids)
+            stats["already_known"] = discovery.already_known
+            stats["searched_locations"] = discovery.searched_locations
+            print(
+                f"      Found {len(company_ids)} new companies "
+                f"({discovery.already_known} seen before, skipped)."
+            )
 
-        checkpoint("scoring")
-        print("[2/5] Scoring ICP fit (deterministic)...")
-        stats["scored"] = score_companies_for_profile(profile.id, icp, company_ids)
-        threshold = icp.get("min_icp_fit_score", 50)
-        qualifying = _qualifying_companies(profile.id, threshold)
-        stats["qualified"] = _qualified_total(profile.id, threshold)
-        stats["qualifying"] = len(qualifying)
-        print(f"      Scored {stats['scored']} companies; {stats['qualified']} match the profile in total.")
-        print(
-            f"      {len(qualifying)} companies clear the ICP fit threshold ({threshold}) "
-            "and still need a memo."
-        )
+            checkpoint("scoring")
+            print("[2/5] Scoring ICP fit (deterministic)...")
+            stats["scored"] = score_companies_for_profile(profile.id, icp, company_ids)
+            threshold = icp.get("min_icp_fit_score", 50)
+            qualifying = _qualifying_companies(profile.id, threshold)
+            stats["qualified"] = _qualified_total(profile.id, threshold)
+            stats["qualifying"] = len(qualifying)
+            print(
+                f"      Scored {stats['scored']} companies; "
+                f"{stats['qualified']} match the profile in total."
+            )
+            print(
+                f"      {len(qualifying)} companies clear the ICP fit threshold ({threshold}) "
+                "and still need a memo."
+            )
 
-        stats["evidence_added"] = 0
-        stats["evidence_done"] = 0
-        checkpoint("evidence")
-        print("[3/5] Retrieving bounded evidence per qualifying company...")
-        for row in qualifying:
-            n = retrieve_evidence_for_company(profile.id, row["id"], row["name"], config["signal_taxonomy"])
-            stats["evidence_added"] += n
-            stats["evidence_done"] += 1
+            stats["evidence_added"] = 0
+            stats["evidence_done"] = 0
             checkpoint("evidence")
-            print(f"      {row['name']}: {n} new evidence items")
-
-        stats["memos_generated"] = 0
-        stats["memos_failed"] = 0
-        checkpoint("memos")
-        print("[4/5] Generating grounded memos + validating citations...")
-        for row in qualifying:
-            evidence_items = get_evidence_for_company(profile.id, row["id"])
-            try:
-                memo = build_memo(
-                    product, row, evidence_items, profile_id=profile.id, run_id=run_id,
-                    likely_need_phrases=likely_need_phrases(config),
+            print("[3/5] Retrieving bounded evidence per qualifying company...")
+            for row in qualifying:
+                n = retrieve_evidence_for_company(
+                    profile.id, row["id"], row["name"], config["signal_taxonomy"]
                 )
-            except Exception:
-                stats["memos_failed"] += 1
-                checkpoint("memos")
-                logger.exception("Memo generation failed for %s -- skipping, batch continues", row["name"])
-                print(f"      {row['name']}: FAILED (see log) -- skipped")
-                continue
-            stats["memos_generated"] += 1
-            checkpoint("memos")
-            issues = memo["issues"]
-            flag = f" -- {len(issues)} citation issue(s), flagged for review" if issues else ""
-            print(f"      {row['name']}: {memo['signal_confidence']}{flag}")
+                stats["evidence_added"] += n
+                stats["evidence_done"] += 1
+                checkpoint("evidence")
+                print(f"      {row['name']}: {n} new evidence items")
 
-        checkpoint("exporting")
-        print("[5/5] Exporting to CSV...")
-        stats["csv_path"] = export_memos_to_csv(profile.id, profile.name)
-        print(f"      Done: {stats['csv_path']}")
-    except BaseException as exc:  # includes Ctrl+C: the run must not stay "running" forever
-        fail_run(run_id, stats, f"{type(exc).__name__}: {exc}")
-        logger.error("Run %d failed: %s", run_id, exc)
-        raise
+            stats["memos_generated"] = 0
+            stats["memos_failed"] = 0
+            checkpoint("memos")
+            print("[4/5] Generating grounded memos + validating citations...")
+            for row in qualifying:
+                evidence_items = get_evidence_for_company(profile.id, row["id"])
+                try:
+                    memo = build_memo(
+                        product, row, evidence_items, profile_id=profile.id, run_id=run_id,
+                        likely_need_phrases=likely_need_phrases(config),
+                    )
+                except Exception:
+                    stats["memos_failed"] += 1
+                    checkpoint("memos")
+                    logger.exception(
+                        "Memo generation failed for %s -- skipping, batch continues", row["name"]
+                    )
+                    print(f"      {row['name']}: FAILED (see log) -- skipped")
+                    continue
+                stats["memos_generated"] += 1
+                checkpoint("memos")
+                issues = memo["issues"]
+                flag = f" -- {len(issues)} citation issue(s), flagged for review" if issues else ""
+                print(f"      {row['name']}: {memo['signal_confidence']}{flag}")
+
+            checkpoint("exporting")
+            print("[5/5] Exporting to CSV...")
+            stats["csv_path"] = export_memos_to_csv(profile.id, profile.name)
+            print(f"      Done: {stats['csv_path']}")
+        except BaseException as exc:  # includes Ctrl+C: the run must not stay "running" forever
+            stats["cost"] = _cost_stats(run_id)
+            fail_run(run_id, stats, f"{type(exc).__name__}: {exc}")
+            logger.error("Run %d failed: %s", run_id, exc)
+            raise
 
     stats["stage"] = "done"
+    stats["cost"] = _cost_stats(run_id)
     complete_run(run_id, stats)
     logger.info("Run %d succeeded: %s", run_id, stats)
     return run_id

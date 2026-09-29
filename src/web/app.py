@@ -1,45 +1,37 @@
-"""Local web UI: profile editor + run launcher with live progress.
+"""Local web UI.
 
-Server-rendered Jinja2 pages, with htmx polling for run progress. Meant to
-run on the operator's own machine only (bound to 127.0.0.1, no login), so two
-guards matter: a Host check (blocks DNS-rebinding) and a same-origin check on
-every state-changing request (blocks other websites from submitting forms to
-localhost -- e.g. silently starting a run that spends API credits).
+Server-rendered Jinja2 pages, with htmx for live bits (search progress,
+cost estimates). Pages about leads live in lead_pages.py; this module holds
+the app itself, campaigns, searches, email drafts and CSV export.
+
+Meant to run on the operator's own machine only (bound to 127.0.0.1, no
+login), so two guards matter: a Host check (blocks DNS-rebinding) and a
+same-origin check on every state-changing request (blocks other websites
+from submitting forms to localhost -- e.g. silently starting a search that
+spends API credits).
 """
+
 import io
 import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from starlette.datastructures import FormData, UploadFile
+from starlette.datastructures import UploadFile
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from ..config import ConfigError, load_config, validate_config
-from ..contacts import (
-    ContactNotFoundError,
-    ContactValidationError,
-    add_manual_contact,
-    delete_contact,
-    find_people,
-    get_contact,
-    list_contacts,
-    update_contact,
-)
+from ..contacts import ContactNotFoundError
 from ..db import DEFAULT_PROFILE_PATH
 from ..export import filename_slug, write_memos_csv
-from ..icp_scorer import WEIGHTS
 from ..outreach import (
     DraftNotFoundError,
     OutreachError,
     approve_draft,
-    drafts_for_memo,
     generate_draft,
     get_draft,
     list_drafts,
@@ -55,40 +47,31 @@ from ..profiles import (
     list_profiles,
     update_profile,
 )
-from ..review import (
-    CONFIDENCE_FILTERS,
-    DECISIONS,
-    SORTS,
-    STATUS_FILTERS,
-    MemoNotFoundError,
-    get_memo,
-    list_memos,
-    next_memo_to_review,
-    refresh_signals,
-    regenerate_memo,
-    set_review,
-    status_counts,
-)
+from ..review import MemoNotFoundError, get_memo, refresh_signals
 from ..runs import RunNotFoundError, fail_orphaned_runs, get_run, list_runs
+from ..usage import usage_context
 from . import runner
 from .forms import FORM_ERROR, config_to_form, form_to_config, group_errors
-from .rendering import mailto_link, render_cited_text, safe_http_url
+from .lead_pages import MAX_DISCOVER_LIMIT, register_lead_pages
+from .rendering import mailto_link
+from .templating import WEB_DIR, templates
 
 logger = logging.getLogger("sales_agent")
 
-WEB_DIR = Path(__file__).resolve().parent
 DEFAULT_ALLOWED_HOSTS = ("127.0.0.1", "localhost")
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-MAX_DISCOVER_LIMIT = 100
 MAX_IMPORT_BYTES = 1_000_000
 
-templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
-templates.env.filters["cited"] = render_cited_text
-templates.env.filters["safe_url"] = safe_http_url
+DRAFT_NOTICES = {
+    "written": "Email written. Check it, edit if needed, then approve it.",
+    "saved": "Changes saved.",
+    "approved": "Email approved. Copy it or open it in your email app, send it, then mark it as sent.",
+    "sent": "Marked as sent.",
+}
 
 
 def _starter_config() -> dict:
-    """Pre-fills the "new profile" form; an empty skeleton if the starter
+    """Pre-fills the "new campaign" form; an empty skeleton if the starter
     file is missing or invalid.
     """
     try:
@@ -103,30 +86,6 @@ def _unique_copy_name(name: str) -> str:
     while candidate in existing:
         candidate, n = f"{name} (copy {n})", n + 1
     return candidate
-
-
-CONTACT_NOTICES = {
-    "added": "Person added.",
-    "saved": "Person updated.",
-    "deleted": "Person deleted, along with any emails written to them.",
-}
-DRAFT_NOTICES = {
-    "written": "Email written. Check it, edit if needed, then approve it.",
-    "saved": "Changes saved.",
-    "approved": "Email approved. Copy it or open it in your email app, send it, then mark it as sent.",
-    "sent": "Marked as sent.",
-}
-
-
-def _people_notice(added: str, known: str) -> str:
-    also = f" ({known} already saved)" if known != "0" else ""
-    if added == "0":
-        return f"No new people found in the target roles{also}. You can add someone manually below."
-    return f"Found {added} new {'person' if added == '1' else 'people'} to contact{also}."
-
-
-def _contact_fields(form: FormData) -> dict[str, str]:
-    return {key: str(form.get(key, "")) for key in ("name", "title", "email", "profile_url")}
 
 
 def _parse_limit(text: str) -> int | None:
@@ -161,7 +120,9 @@ def create_app(*, allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS) -> Fas
                 return Response("Cross-site request rejected", status_code=403)
         return await call_next(request)
 
-    # ---------- profiles ----------
+    register_lead_pages(app)
+
+    # ---------- campaigns (stored as profiles) ----------
 
     def render_profile_form(
         request: Request,
@@ -212,16 +173,12 @@ def create_app(*, allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS) -> Fas
             except (InvalidProfileNameError, ProfileExistsError) as exc:
                 errors = {"name": [str(exc)]}
             else:
-                # signal rules may have changed: keep existing memos' labels consistent
+                # signal rules may have changed: keep existing research labels consistent
                 refresh_signals(profile.id)
                 return RedirectResponse(f"/profiles?saved={profile.id}", status_code=303)
         return render_profile_form(
             request, profile_id=profile_id, name=name, values=form, errors=errors, status_code=422
         )
-
-    @app.get("/")
-    def home() -> RedirectResponse:
-        return RedirectResponse("/profiles", status_code=303)
 
     @app.get("/profiles", response_class=HTMLResponse)
     def profiles_page(request: Request) -> HTMLResponse:
@@ -270,7 +227,7 @@ def create_app(*, allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS) -> Fas
             return render_profiles(request, import_error="Choose a JSON file and a name", status_code=422)
         raw = await upload.read(MAX_IMPORT_BYTES + 1)
         if len(raw) > MAX_IMPORT_BYTES:
-            return render_profiles(request, import_error="File is too large for a profile", status_code=422)
+            return render_profiles(request, import_error="File is too large for a campaign", status_code=422)
         try:
             config = json.loads(raw.decode("utf-8"))
             validate_config(config)
@@ -281,7 +238,21 @@ def create_app(*, allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS) -> Fas
             return render_profiles(request, import_error=str(exc), status_code=422)
         return RedirectResponse(f"/profiles?saved={profile.id}", status_code=303)
 
-    # ---------- runs ----------
+    @app.get("/profiles/{profile_id:int}/memos.csv")
+    def download_memos_csv(profile_id: int) -> Response:
+        profile = get_profile(profile_id)
+        buffer = io.StringIO()
+        write_memos_csv(profile.id, buffer)
+        # BOM so Excel detects UTF-8 (the stored signal labels contain emoji)
+        return Response(
+            ("﻿" + buffer.getvalue()).encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="leads_{filename_slug(profile.name)}.csv"'
+            },
+        )
+
+    # ---------- searches (runs) ----------
 
     def render_runs(
         request: Request,
@@ -320,7 +291,7 @@ def create_app(*, allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS) -> Fas
                 request,
                 selected_profile_id=selected,
                 limit=limit_text,
-                error=f"Pick a profile and a limit between 1 and {MAX_DISCOVER_LIMIT}",
+                error=f"Pick a campaign and a number between 1 and {MAX_DISCOVER_LIMIT}",
                 status_code=422,
             )
         profile = get_profile(selected)
@@ -340,175 +311,7 @@ def create_app(*, allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS) -> Fas
     def run_status(request: Request, run_id: int) -> HTMLResponse:
         return templates.TemplateResponse(request, "_run_status.html", {"run": get_run(run_id)})
 
-    # ---------- review ----------
-
-    @app.get("/review", response_class=HTMLResponse)
-    def review_page(
-        request: Request,
-        profile_id: int | None = None,
-        status: str = "to_review",
-        confidence: str = "",
-        sort: str = "score",
-    ) -> HTMLResponse:
-        profiles = list_profiles()
-        profile = get_profile(profile_id) if profile_id is not None else (profiles[0] if profiles else None)
-        status = status if status in STATUS_FILTERS else "to_review"
-        confidence = confidence if confidence in CONFIDENCE_FILTERS else ""
-        sort = sort if sort in SORTS else "score"
-        return templates.TemplateResponse(
-            request,
-            "review.html",
-            {
-                "profiles": profiles,
-                "profile": profile,
-                "memos": list_memos(profile.id, status=status, confidence=confidence, sort=sort)
-                if profile
-                else [],
-                "counts": status_counts(profile.id) if profile else {},
-                "filters": {"status": status, "confidence": confidence, "sort": sort},
-                "confidence_labels": CONFIDENCE_FILTERS,
-            },
-        )
-
-    def render_memo(
-        request: Request, memo_id: int, *, error: str | None = None, status_code: int = 200
-    ) -> HTMLResponse:
-        memo = get_memo(memo_id)
-        notice = None
-        done_id = request.query_params.get("done")
-        if done_id and done_id.isdigit():
-            try:
-                done = get_memo(int(done_id))
-                notice = f"Saved: {done.company['name']} marked {done.review_status.replace('_', ' ')}."
-            except MemoNotFoundError:
-                pass
-        elif request.query_params.get("regenerated"):
-            notice = "Memo regenerated from the stored evidence. Review it again below."
-        elif request.query_params.get("saved"):
-            notice = "Review saved."
-        elif request.query_params.get("people") is not None:
-            params = request.query_params
-            notice = _people_notice(params.get("people", "0"), params.get("known", "0"))
-        elif request.query_params.get("contact"):
-            notice = CONTACT_NOTICES.get(request.query_params["contact"])
-        return templates.TemplateResponse(
-            request,
-            "memo_detail.html",
-            {
-                "memo": memo,
-                "notice": notice,
-                "error": error,
-                "weights": WEIGHTS,
-                "contacts": list_contacts(memo.company["id"]),
-                "drafts": drafts_for_memo(memo.id),
-            },
-            status_code=status_code,
-        )
-
-    @app.get("/memos/{memo_id:int}", response_class=HTMLResponse)
-    def memo_page(request: Request, memo_id: int) -> HTMLResponse:
-        return render_memo(request, memo_id)
-
-    @app.post("/memos/{memo_id:int}/review")
-    async def review_memo(request: Request, memo_id: int) -> Response:
-        form = await request.form()
-        decision, notes = str(form.get("decision", "")), str(form.get("notes", ""))
-        if decision not in DECISIONS:
-            return render_memo(request, memo_id, error="Unknown review decision", status_code=422)
-        set_review(memo_id, decision, notes)
-        memo = get_memo(memo_id)
-        if decision != "reset" and form.get("advance"):
-            next_id = next_memo_to_review(memo.profile_id, exclude_id=memo_id)
-            if next_id is not None:
-                return RedirectResponse(f"/memos/{next_id}?done={memo_id}", status_code=303)
-            return RedirectResponse(f"/review?profile_id={memo.profile_id}&status=all", status_code=303)
-        return RedirectResponse(f"/memos/{memo_id}?saved=1", status_code=303)
-
-    @app.post("/memos/{memo_id:int}/regenerate")
-    def regenerate(request: Request, memo_id: int) -> Response:
-        get_memo(memo_id)  # 404 before spending an LLM call
-        try:
-            regenerate_memo(memo_id)
-        except Exception as exc:  # external LLM call: show the failure, keep the old memo
-            logger.exception("Regenerating memo %d failed", memo_id)
-            return render_memo(
-                request, memo_id, error=f"Regeneration failed, the previous memo is unchanged: {exc}",
-                status_code=502,
-            )
-        return RedirectResponse(f"/memos/{memo_id}?regenerated=1", status_code=303)
-
-    @app.get("/profiles/{profile_id:int}/memos.csv")
-    def download_memos_csv(profile_id: int) -> Response:
-        profile = get_profile(profile_id)
-        buffer = io.StringIO()
-        write_memos_csv(profile.id, buffer)
-        # BOM so Excel detects UTF-8 (the confidence labels contain emoji)
-        return Response(
-            ("\ufeff" + buffer.getvalue()).encode("utf-8"),
-            media_type="text/csv; charset=utf-8",
-            headers={
-                "Content-Disposition": f'attachment; filename="memos_{filename_slug(profile.name)}.csv"'
-            },
-        )
-
-    # ---------- people ----------
-
-    @app.post("/memos/{memo_id:int}/find-people")
-    def find_people_route(request: Request, memo_id: int) -> Response:
-        memo = get_memo(memo_id)
-        if memo.review_status != "approved":
-            return render_memo(
-                request, memo_id, error="Approve the memo before finding people", status_code=409
-            )
-        roles = get_profile(memo.profile_id).config["icp"].get("roles") or []
-        try:
-            result = find_people(memo.company["id"], memo.company["name"], memo.company["city"], roles)
-        except Exception as exc:  # external search: show the failure, change nothing
-            logger.exception("Finding people for memo %d failed", memo_id)
-            return render_memo(request, memo_id, error=f"People search failed: {exc}", status_code=502)
-        return RedirectResponse(
-            f"/memos/{memo_id}?people={len(result.added)}&known={result.already_saved}#people",
-            status_code=303,
-        )
-
-    @app.post("/memos/{memo_id:int}/contacts")
-    async def add_contact_route(request: Request, memo_id: int) -> Response:
-        memo = get_memo(memo_id)
-        try:
-            add_manual_contact(memo.company["id"], **_contact_fields(await request.form()))
-        except ContactValidationError as exc:
-            return render_memo(request, memo_id, error=str(exc), status_code=422)
-        return RedirectResponse(f"/memos/{memo_id}?contact=added#people", status_code=303)
-
-    @app.post("/memos/{memo_id:int}/contacts/{contact_id:int}")
-    async def update_contact_route(request: Request, memo_id: int, contact_id: int) -> Response:
-        get_memo(memo_id)
-        try:
-            update_contact(contact_id, **_contact_fields(await request.form()))
-        except ContactValidationError as exc:
-            return render_memo(request, memo_id, error=str(exc), status_code=422)
-        return RedirectResponse(f"/memos/{memo_id}?contact=saved#people", status_code=303)
-
-    @app.post("/memos/{memo_id:int}/contacts/{contact_id:int}/delete")
-    def delete_contact_route(memo_id: int, contact_id: int) -> Response:
-        get_memo(memo_id)
-        delete_contact(contact_id)
-        return RedirectResponse(f"/memos/{memo_id}?contact=deleted#people", status_code=303)
-
-    # ---------- outreach drafts ----------
-
-    @app.post("/memos/{memo_id:int}/contacts/{contact_id:int}/draft")
-    def write_draft(request: Request, memo_id: int, contact_id: int) -> Response:
-        get_memo(memo_id)
-        get_contact(contact_id)  # 404 before spending an LLM call
-        try:
-            draft = generate_draft(memo_id, contact_id)
-        except OutreachError as exc:
-            return render_memo(request, memo_id, error=str(exc), status_code=409)
-        except Exception as exc:  # external LLM call
-            logger.exception("Writing email for memo %d, contact %d failed", memo_id, contact_id)
-            return render_memo(request, memo_id, error=f"Writing the email failed: {exc}", status_code=502)
-        return RedirectResponse(f"/drafts/{draft.id}?done=written", status_code=303)
+    # ---------- email drafts ----------
 
     def render_draft(
         request: Request,
@@ -566,7 +369,8 @@ def create_app(*, allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS) -> Fas
     def regenerate_draft(request: Request, draft_id: int) -> Response:
         draft = get_draft(draft_id)
         try:
-            generate_draft(draft.memo_id, draft.contact_id)
+            with usage_context("write_email", profile_id=draft.profile_id):
+                generate_draft(draft.memo_id, draft.contact_id)
         except OutreachError as exc:
             return render_draft(request, draft_id, error=str(exc), status_code=409)
         except Exception as exc:  # external LLM call: the old draft stays
@@ -595,10 +399,13 @@ def create_app(*, allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS) -> Fas
     async def not_found(request: Request, exc: Exception) -> HTMLResponse:
         return templates.TemplateResponse(request, "not_found.html", {"message": str(exc)}, status_code=404)
 
-    app.add_exception_handler(ProfileNotFoundError, not_found)
-    app.add_exception_handler(RunNotFoundError, not_found)
-    app.add_exception_handler(MemoNotFoundError, not_found)
-    app.add_exception_handler(ContactNotFoundError, not_found)
-    app.add_exception_handler(DraftNotFoundError, not_found)
+    for error in (
+        ProfileNotFoundError,
+        RunNotFoundError,
+        MemoNotFoundError,
+        ContactNotFoundError,
+        DraftNotFoundError,
+    ):
+        app.add_exception_handler(error, not_found)
 
     return app

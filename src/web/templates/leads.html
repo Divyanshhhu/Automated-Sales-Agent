@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Leads{% endblock %}
+{% block content %}
+{% if not campaign %}
+  <h1>Leads</h1>
+  <div class="card"><p class="empty">No campaigns yet. <a href="/profiles/new">Create one</a>, then find leads from Home.</p></div>
+{% else %}
+<div class="page-head">
+  <div>
+    <h1>Leads</h1>
+    <p class="subhead">Every company the {{ campaign.name }} campaign has found, and where each one is.</p>
+  </div>
+  <form method="get" action="/leads" class="inline-form">
+    {% if campaigns | length > 1 %}
+    <div class="field">
+      <label for="campaign-pick">Campaign</label>
+      <select id="campaign-pick" name="campaign" onchange="this.form.submit()">
+        {% for c in campaigns %}<option value="{{ c.id }}" {% if c.id == campaign.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+      </select>
+    </div>
+    {% else %}<input type="hidden" name="campaign" value="{{ campaign.id }}">{% endif %}
+    <input type="hidden" name="stage" value="{{ stage }}">
+    <div class="field">
+      <label for="q">Search</label>
+      <input id="q" type="search" name="q" value="{{ q }}" placeholder="Company name">
+    </div>
+    <a class="btn btn-quiet" href="/profiles/{{ campaign.id }}/memos.csv">Download CSV</a>
+  </form>
+</div>
+
+<nav class="chips" aria-label="Stage" style="margin-bottom: 18px">
+  {% for key, label in stages %}
+    <a class="chip {% if stage == key %}chip-active{% endif %}" {% if stage == key %}aria-current="page"{% endif %}
+       href="/leads?campaign={{ campaign.id }}&amp;stage={{ key }}{% if q %}&amp;q={{ q | urlencode }}{% endif %}">{{ label }} <span class="count">{{ counts[key] }}</span></a>
+  {% endfor %}
+</nav>
+
+<section class="card list">
+  <div class="leads-head"><span>Company</span><span>Fit</span><span>Buying signal</span><span>Stage</span><span>Next step</span></div>
+  {% for lead in leads %}
+  <div class="lead-row">
+    <div>
+      <div class="name">{% if lead.memo_id %}<a href="/leads/{{ lead.memo_id }}">{{ lead.name | short }}</a>{% else %}{{ lead.name | short }}{% endif %}</div>
+      <div class="meta">{{ lead.domain or "" }}{% if lead.location %} · {{ lead.location }}{% endif %}{% if lead.employee_count %} · {{ "{:,}".format(lead.employee_count) }} people{% endif %}</div>
+    </div>
+    <div>
+      {% if lead.fit is not none %}
+        <div><strong>{{ lead.fit | round | int }}</strong> <span class="small muted">/ 100 · {{ lead.fit_word }}</span></div>
+        <span class="bar {% if lead.fit_word == 'Weak fit' %}bar-weak{% endif %}" aria-hidden="true"><span style="width: {{ lead.fit | round | int }}%"></span></span>
+      {% endif %}
+    </div>
+    <div>
+      {% if lead.signal_level %}
+        <span class="signal"><span class="dot dot-{{ lead.signal_level }}"></span>{{ lead.signal_name }}</span>
+        <div class="small muted">{{ lead.signal_summary }}</div>
+      {% elif lead.why_not %}
+        <span class="small muted">{{ lead.why_not }}</span>
+      {% else %}
+        <span class="small muted">Not researched yet</span>
+      {% endif %}
+    </div>
+    <div><span class="badge badge-{{ lead.stage }}">{{ lead.stage_name }}</span></div>
+    <div>
+      {% if lead.memo_id and lead.stage not in ("notfit", "contacted") %}
+        <a class="btn btn-small {% if lead.stage == 'review' %}btn-primary{% endif %}" href="/leads/{{ lead.memo_id }}{% if lead.stage == 'approved' %}#people{% endif %}">{{ lead.next_step }}</a>
+      {% elif lead.memo_id %}
+        <a class="small" href="/leads/{{ lead.memo_id }}">Open</a>
+      {% else %}
+        <span class="small muted">{{ lead.next_step }}</span>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+    <p class="empty" style="padding: 32px 24px; text-align: center">
+      {% if counts.all == 0 %}No companies yet — <a href="/?campaign={{ campaign.id }}#find">find leads</a> from Home.
+      {% elif q %}No company matches “{{ q }}” here.
+      {% else %}Nothing at this stage yet.{% endif %}
+    </p>
+  {% endfor %}
+</section>
+{% endif %}
+{% endblock %}

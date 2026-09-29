@@ -8,10 +8,10 @@ it was made.
 import json
 from dataclasses import dataclass
 
-from .confidence import LABELS, LEVEL_ORDER, SignalAssessment, assess_signal
+from .confidence import LABELS, LEVEL_ORDER, SignalAssessment, assess_signal, category_label
 from .config import likely_need_phrases
 from .db import get_connection, utc_now
-from .evidence import get_evidence_for_company
+from .evidence import get_evidence_for_company, retrieve_evidence_for_company, unsearched_categories
 from .memo_generator import extract_cited_evidence_ids, write_memo
 from .profiles import get_profile
 
@@ -81,6 +81,7 @@ class MemoDetail:
     generated_at: str | None
     evidence: list[dict]  # each item gains "cited": bool
     signal: SignalAssessment  # recomputed with the profile's current rules, with the reason
+    unchecked_sources: list[str]  # signal categories never searched for this company (plain names)
 
     @property
     def evidence_ids(self) -> set[int]:
@@ -178,9 +179,11 @@ def get_memo(memo_id: int) -> MemoDetail:
         # only what the model was shown for this memo (older memos: everything)
         if shown_ids is None or e["id"] in shown_ids
     ]
+    config = json.loads(row["config_json"])
+    unchecked = unsearched_categories(row["profile_id"], row["company_id"], config.get("signal_taxonomy", {}))
     signal = assess_signal(
         [e for e in all_evidence if e["id"] in cited],
-        likely_need_phrases(json.loads(row["config_json"])),
+        likely_need_phrases(config),
         # includes evidence fetched after the memo was written, so the
         # explanation can point out a stronger item worth regenerating for
         uncited_evidence=[e for e in all_evidence if e["id"] not in cited],
@@ -213,6 +216,7 @@ def get_memo(memo_id: int) -> MemoDetail:
         generated_at=row["generated_at"],
         evidence=evidence,
         signal=signal,
+        unchecked_sources=[category_label(c) for c in unchecked],
     )
 
 
@@ -327,3 +331,30 @@ def regenerate_memo(memo_id: int) -> MemoDetail:
     finally:
         conn.close()
     return get_memo(memo_id)
+
+
+@dataclass(frozen=True)
+class ResearchUpdate:
+    new_sources: int  # evidence items added by the searches that hadn't run yet
+    searched: list[str]  # those searches, in plain names
+    memo: MemoDetail
+
+
+def update_research(memo_id: int) -> ResearchUpdate:
+    """Runs the profile's evidence searches that never ran for this company
+    (e.g. the complaint-site search, added after it was researched), then
+    rewrites the research from everything now stored. Costs one Tavily credit
+    per missing search plus one LLM call. Like regenerate_memo, it clears the
+    previous decision, since the text it judged is gone.
+    """
+    memo = get_memo(memo_id)
+    taxonomy = get_profile(memo.profile_id).config["signal_taxonomy"]
+    missing = unsearched_categories(memo.profile_id, memo.company["id"], taxonomy)
+    added = (
+        retrieve_evidence_for_company(memo.profile_id, memo.company["id"], memo.company["name"], taxonomy)
+        if missing
+        else 0
+    )
+    return ResearchUpdate(
+        new_sources=added, searched=[category_label(c) for c in missing], memo=regenerate_memo(memo_id)
+    )

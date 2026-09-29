@@ -21,16 +21,16 @@ def _form(config: dict, name: str) -> dict[str, str]:
 # ---------- pages ----------
 
 
-def test_home_redirects_to_profiles(client: TestClient) -> None:
-    response = client.get("/", follow_redirects=False)
-    assert response.status_code == 303
-    assert response.headers["location"] == "/profiles"
+def test_home_without_campaigns_invites_you_to_create_one(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Create your first campaign" in response.text
 
 
 def test_empty_profiles_page(client: TestClient) -> None:
     response = client.get("/profiles")
     assert response.status_code == 200
-    assert "No profiles yet" in response.text
+    assert "No campaigns yet" in response.text
 
 
 def test_new_profile_form_is_prefilled_from_starter(client: TestClient) -> None:
@@ -49,7 +49,7 @@ def test_create_profile(client: TestClient) -> None:
     profile = get_profile_by_name("Mumbai mid-size")
     assert profile.config["icp"] == {**VALID_CONFIG["icp"], "industries": [], "roles": []}
     assert profile.config["signal_taxonomy"] == VALID_CONFIG["signal_taxonomy"]
-    assert "Profile saved" in client.get(response.headers["location"]).text
+    assert "Campaign saved" in client.get(response.headers["location"]).text
 
 
 def test_invalid_form_shows_errors_next_to_fields_and_saves_nothing(client: TestClient) -> None:
@@ -179,7 +179,10 @@ def test_start_run_and_view_result(client: TestClient, monkeypatch: pytest.Monke
             "No new companies found",
         ),
         ({"discovered": 4, "already_known": 0, "qualifying": 0, "memos_generated": 0}, "but none scored 50"),
-        ({"discovered": 4, "already_known": 0, "qualifying": 2, "memos_generated": 2}, "2 new memos written"),
+        (
+            {"discovered": 4, "already_known": 0, "qualifying": 2, "memos_generated": 2},
+            "2 new companies researched",
+        ),
         ({"discovered": 5, "qualifying": 0, "memos_generated": 0}, None),  # old run: no explanation
     ],
 )

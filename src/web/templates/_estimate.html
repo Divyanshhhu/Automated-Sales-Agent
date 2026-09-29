@@ -1,0 +1,12 @@
+<div class="estimate" id="estimate" aria-live="polite">
+  <div class="estimate-total">
+    <span><strong>Estimated cost</strong></span>
+    <span class="value">up to {{ estimate.total_usd | money }}</span>
+  </div>
+  <ul>
+    <li>Finding companies (Exa): about {{ estimate.exa_usd | money }}</li>
+    <li>Researching good fits (Tavily): about {{ estimate.tavily_usd | money }} — {{ estimate.tavily_credits }} credits, {{ estimate.free_share_percent }}% of your free month</li>
+    <li>Writing summaries (OpenAI): about {{ estimate.openai_usd | money }}</li>
+  </ul>
+  <span class="small muted">Only companies that fit get researched, so it's usually less. You'll see the real cost when it finishes.</span>
+</div>

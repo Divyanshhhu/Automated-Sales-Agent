@@ -53,6 +53,26 @@ automatically. Contacts are personal data (India's DPDP Act): only work
 details are stored, with their source, and deleting a person deletes the
 emails written to them.
 
+**UI redesign + cost tracking (done):** the UI is organised around your
+work, not the system's parts, in plain words (a profile is a **campaign**, a
+run is **Find leads**, a memo is the company's **research**, and signals
+read Clear / Likely / Possible need):
+
+- **Home** — your pipeline (found → good fit → to review → approved →
+  emails ready → sent), a "what to do next" list, **Find leads** with a live
+  cost estimate, and what you've spent this month.
+- **Leads** — every company in one list by stage, with its fit, buying
+  signal and next step; "not a fit" companies say why.
+- **Company page** — a progress bar (research → approve → contact → email →
+  sent) and one obvious next action; research with numbered footnotes to its
+  sources; "Update research" runs searches that never ran for that company;
+  keyboard shortcuts (A approve, R not a fit, J/K next/previous).
+- **Campaign setup** in three steps, with the technical settings under
+  "Advanced".
+- **Real costs**: every paid API call is recorded (Exa's reported cost,
+  Tavily credits, OpenAI tokens) against its search or action, so each
+  search shows what it actually cost.
+
 ## How it works
 
 ```
@@ -125,12 +145,13 @@ Fill in `.env` with your own keys:
 .\.venv\Scripts\python.exe run.py serve
 ```
 
-Then open http://127.0.0.1:8000. The UI only listens on your own machine
-(127.0.0.1) and has no login, so it isn't reachable from other devices. It
-also refuses form submissions coming from other websites, so a page you
-visit can't start a run (and spend API credits) behind your back. Only one
-run executes at a time; a run interrupted by stopping the server is marked
-failed the next time it starts.
+Then open http://127.0.0.1:8000 — Home tells you what to do next. The UI
+only listens on your own machine (127.0.0.1) and has no login, so it isn't
+reachable from other devices. It also refuses form submissions coming from
+other websites, so a page you visit can't start a search (and spend API
+credits) behind your back. Only one search runs at a time; one interrupted
+by stopping the server is marked failed the next time it starts. The pages
+use Google Fonts when online and fall back to system fonts offline.
 
 ### Command line
 
@@ -182,7 +203,14 @@ profile named "Default", created from `config\product_profile.json`.
 Tests use a throwaway SQLite file and fake the external APIs, so they cost
 nothing and never touch `data\pipeline.sqlite`.
 
-## Cost per run (rough)
+## Cost per run
+
+Real costs are recorded as you go: each search's page shows what it cost,
+and Home shows this month's total and how many of Tavily's free credits are
+used. Prices live in `src/usage.py` and can be overridden in `.env`
+(`TAVILY_PRICE_PER_CREDIT`, `TAVILY_FREE_CREDITS_PER_MONTH`,
+`OPENAI_PRICE_PER_M_INPUT`, `OPENAI_PRICE_PER_M_OUTPUT`); Exa reports its own
+cost per call. Rough figures:
 
 For a batch that finds ~15-20 qualifying companies out of ~30-35
 discovered candidates:
@@ -216,16 +244,20 @@ src/
   db.py               SQLite connection + versioned schema migrations
   profiles.py         Named profiles stored in the database
   runs.py             Pipeline run records (status, stats, config snapshot)
-  review.py           Memo review: list/filter, decisions, regenerate
+  review.py           Research review: decisions, regenerate, update research
+  leads.py            Stages, next steps and the Home dashboard (derived, never stored)
+  usage.py            Real API cost recording, monthly totals, run estimates
   contacts.py         People at a company: Exa people search + manual, DPDP-minded
   outreach.py         Grounded email drafts: write, edit, approve, mark sent
   citations.py        Shared citation checker (memos + emails)
   llm.py              Shared OpenAI structured-output call with retries
   web/                Local web UI (FastAPI + Jinja2 templates + htmx)
-    app.py            Routes + local-only safety checks
-    forms.py          Profile form <-> config conversion, per-field errors
-    runner.py         Background run thread (one at a time)
-    rendering.py      Escaped memo HTML with citation links; safe URLs
+    app.py            App, campaigns, searches, email drafts + local-only safety checks
+    lead_pages.py     Home, Leads and the company page, and actions on a company
+    templating.py     Shared Jinja2 environment and display filters
+    forms.py          Campaign form <-> config conversion, per-field errors
+    runner.py         Background search thread (one at a time)
+    rendering.py      Escaped research HTML with footnotes; safe URLs
   discovery.py         Exa company search + firmographics, with noise filters
   exa_client.py        Shared Exa search client
   tavily_client.py      Shared Tavily search client

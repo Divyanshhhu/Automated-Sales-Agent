@@ -6,6 +6,7 @@ import os
 import requests
 
 from .retry import call_with_retry, is_retriable_requests_error
+from .usage import record_tavily
 
 TAVILY_URL = "https://api.tavily.com/search"
 
@@ -31,4 +32,6 @@ def tavily_search(query: str, max_results: int = 5, **extra_params) -> list[dict
     resp = call_with_retry(
         _do_request, is_retriable=is_retriable_requests_error, context=f"Tavily search({query!r})"
     )
+    # Tavily bills per request: 1 credit for basic depth, 2 for advanced.
+    record_tavily(2 if payload.get("search_depth") == "advanced" else 1, detail=query)
     return resp.json().get("results", [])

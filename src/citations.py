@@ -29,6 +29,11 @@ def _protect_abbreviations(text: str) -> str:
     return protected
 
 
+def sentences(text: str) -> list[str]:
+    """Splits tagged text into sentences, keeping abbreviations like "sq. ft." whole."""
+    return _sentences(text)
+
+
 def _sentences(text: str) -> list[str]:
     parts = re.split(r"(?<=[.!?])\s+", _protect_abbreviations(text.strip()))
     return [p.replace(_PLACEHOLDER_DOT, ".").strip() for p in parts if p.strip()]

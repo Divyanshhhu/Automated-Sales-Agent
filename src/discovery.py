@@ -172,6 +172,7 @@ def company_from_result(result: dict) -> Company | None:
 class Discovery:
     companies: list[Company]  # new companies, up to the limit
     already_known: int  # valid results skipped because the profile has seen them before
+    searched_locations: list[str]  # geographies actually searched (successfully) this time
 
 
 def discover_companies(icp: dict, limit: int = 25, *, known_ids: frozenset[str] = frozenset()) -> Discovery:
@@ -192,6 +193,7 @@ def discover_companies(icp: dict, limit: int = 25, *, known_ids: frozenset[str] 
     companies: list[Company] = []
     seen: set[str] = set()
     already_known = 0
+    searched: list[str] = []
     for geography in icp["geographies"]:
         if len(companies) >= limit:
             break
@@ -201,6 +203,7 @@ def discover_companies(icp: dict, limit: int = 25, *, known_ids: frozenset[str] 
             results = exa_search(query, num_results=RESULTS_PER_SEARCH, category="company")
         except requests.exceptions.RequestException:
             continue  # one geography's search failing shouldn't abort the whole batch
+        searched.append(geography)
         found_before, known_before = len(companies), already_known
         for r in results:
             domain = _domain_from_url(r.get("url", ""))
@@ -223,7 +226,7 @@ def discover_companies(icp: dict, limit: int = 25, *, known_ids: frozenset[str] 
             geography, len(results), sum(1 for r in results if r.get("entity")),
             already_known - known_before, len(companies) - found_before,
         )
-    return Discovery(companies=companies, already_known=already_known)
+    return Discovery(companies=companies, already_known=already_known, searched_locations=searched)
 
 
 def store_companies(companies: list[Company]) -> list[str]:

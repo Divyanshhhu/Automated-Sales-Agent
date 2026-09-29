@@ -39,12 +39,18 @@ def valid_config() -> dict:
     return copy.deepcopy(VALID_CONFIG)
 
 
+@pytest.fixture(autouse=True)
+def _never_touch_the_real_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test gets its own throwaway SQLite file -- including tests that
+    don't ask for one, since API clients now record usage to the database.
+    """
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.sqlite")
+
+
 @pytest.fixture
-def temp_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Points every get_connection() call at a fresh throwaway SQLite file."""
-    path = tmp_path / "test.sqlite"
-    monkeypatch.setattr(db, "DB_PATH", path)
-    return path
+def temp_db() -> Path:
+    """The test's throwaway database file (already in place for every test)."""
+    return db.DB_PATH
 
 
 @pytest.fixture

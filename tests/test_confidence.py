@@ -36,7 +36,9 @@ def test_general_signals_are_plausible_with_explanation() -> None:
         [_e(1, "expansion_launch", "New tower"), _e(2, "funding_financial", "Record sales")], PHRASES
     )
     assert signal.level == "plausible"
-    assert "expansion launch, funding financial" in signal.reason
+    assert "new launches, sales and funding" in signal.reason
+    assert signal.summary == "General signs: new launches, sales and funding"
+    assert signal.name == "Possible need"
 
 
 def test_no_phrases_configured_means_no_likely_level() -> None:
