@@ -92,6 +92,16 @@
   </div>
 
   <div class="card">
+    <h2>Outreach emails</h2>
+    <p class="help muted">Used when writing emails from approved memos. All optional — fill them in when you're ready.</p>
+    {{ text_field('outreach.sender_name', 'Your name', 'Signs the email if no signature is set.') }}
+    {{ area_field('outreach.signature', 'Signature', 'e.g. your name, title, company and phone — added at the end of every email.') }}
+    {{ text_field('outreach.cta_url', 'Call-to-action link',
+       'A booking link (e.g. Calendly) now, or your WhatsApp agent link (https://wa.me/…) later. Each email adds its own reference code so you can tell which email a reply came from. Leave empty to ask for a reply instead.') }}
+    {{ text_field('outreach.cta_label', 'Link text', 'e.g. "Book a 15-minute walkthrough". Shown before the link.') }}
+  </div>
+
+  <div class="card">
     <h2>Evidence searches</h2>
     {{ area_field('signal_taxonomy', 'Search queries',
        'One per line as "category_name: query". {company} is replaced with the company name. Only the direct_pain_point category can produce a 🟢 Strong signal.',

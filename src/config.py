@@ -6,6 +6,7 @@ inside discovery after API credits have already been spent.
 """
 import json
 from typing import Any
+from urllib.parse import urlparse
 
 
 class ConfigError(ValueError):
@@ -86,6 +87,30 @@ def _validate_signal_taxonomy(taxonomy: Any, errors: list[str]) -> None:
             )
 
 
+OUTREACH_TEXT_FIELDS = ("sender_name", "signature", "cta_label", "cta_url")
+MAX_OUTREACH_FIELD_LENGTH = 1000
+
+
+def _validate_outreach(outreach: Any, errors: list[str]) -> None:
+    """Optional section; every field may be empty. A call-to-action link,
+    when given, must be a full http(s) URL -- it goes into emails verbatim.
+    """
+    if not isinstance(outreach, dict):
+        errors.append("outreach must be an object")
+        return
+    for key in OUTREACH_TEXT_FIELDS:
+        value = outreach.get(key, "")
+        if not isinstance(value, str):
+            errors.append(f"outreach.{key} must be a string")
+        elif len(value) > MAX_OUTREACH_FIELD_LENGTH:
+            errors.append(f"outreach.{key} must be at most {MAX_OUTREACH_FIELD_LENGTH} characters")
+    url = outreach.get("cta_url", "")
+    if isinstance(url, str) and url.strip():
+        parsed = urlparse(url.strip())
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            errors.append("outreach.cta_url must be a full link starting with https:// (or leave it empty)")
+
+
 def validate_config(config: Any) -> None:
     """Raises ConfigError listing every problem found, or returns None if valid."""
     if not isinstance(config, dict):
@@ -100,6 +125,8 @@ def validate_config(config: Any) -> None:
         _validate_icp(config["icp"], errors)
     if "signal_taxonomy" in config:
         _validate_signal_taxonomy(config["signal_taxonomy"], errors)
+    if "outreach" in config:
+        _validate_outreach(config["outreach"], errors)
     if errors:
         raise ConfigError("Invalid config:\n  - " + "\n  - ".join(errors), errors)
 

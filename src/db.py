@@ -252,10 +252,61 @@ def _migration_2_profiles(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE memos_v2 RENAME TO memos")
 
 
+def _migration_3_contacts_and_outreach(conn: sqlite3.Connection) -> None:
+    """People to contact at a company, and email drafts written to them.
+
+    Contacts are real people's personal data (India's DPDP Act applies), so
+    only work details are stored, each row records where it came from, and
+    deleting a contact deletes the drafts addressed to them (CASCADE).
+    Contacts belong to the company, not a profile: the same person is the
+    right contact whichever profile found the company.
+    """
+    conn.execute(
+        """
+        CREATE TABLE contacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id TEXT NOT NULL REFERENCES companies (id),
+            name TEXT NOT NULL,
+            title TEXT,
+            location TEXT,
+            profile_url TEXT,
+            email TEXT,
+            source TEXT NOT NULL CHECK (source IN ('exa_people', 'manual')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    # Re-running "find people" must not duplicate someone already found.
+    conn.execute("CREATE UNIQUE INDEX idx_contacts_profile_url ON contacts (company_id, profile_url)")
+    conn.execute(
+        """
+        CREATE TABLE outreach_drafts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            memo_id INTEGER NOT NULL REFERENCES memos (id) ON DELETE CASCADE,
+            contact_id INTEGER NOT NULL REFERENCES contacts (id) ON DELETE CASCADE,
+            ref_code TEXT NOT NULL UNIQUE,
+            generated_body TEXT NOT NULL,
+            citation_issues TEXT,
+            subject TEXT NOT NULL,
+            body TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'approved', 'sent')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            approved_at TEXT,
+            sent_at TEXT,
+            UNIQUE (memo_id, contact_id)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX idx_outreach_drafts_status ON outreach_drafts (status)")
+
+
 # Append-only: never edit a migration that has shipped -- add a new one.
 MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
     _migration_1_initial_schema,
     _migration_2_profiles,
+    _migration_3_contacts_and_outreach,
 ]
 
 

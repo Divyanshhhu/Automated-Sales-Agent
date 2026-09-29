@@ -184,6 +184,7 @@ def get_memo(memo_id: int) -> MemoDetail:
             "domain": row["domain"],
             "employee_count": row["employee_count"],
             "location": _location(row["city"], row["state"], row["country"]),
+            "city": row["city"],
             "description": row["short_description"],
         },
         icp_fit_score=row["icp_fit_score"],

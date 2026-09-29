@@ -5,16 +5,18 @@ first; only then are citation tags turned into markup this module writes
 itself. Nothing from the memo is ever inserted unescaped.
 """
 import re
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from markupsafe import Markup, escape
 
-from ..memo_generator import CITATION_TAG_RE
+from ..citations import TAG_RE
+
+_LABELS = {"INFERENCE": "inference", "NO_EVIDENCE": "no evidence", "PRODUCT": "about your product"}
 
 
 def render_cited_text(text: str, evidence_ids: set[int]) -> Markup:
     """Escapes `text`, then turns [E12] into a link to that evidence item on
-    the page and [INFERENCE] / [NO_EVIDENCE] into labelled tags. A citation
+    the page and [INFERENCE] / [NO_EVIDENCE] / [PRODUCT] into labelled tags. A citation
     to evidence that doesn't exist is marked, not linked.
     """
 
@@ -24,10 +26,16 @@ def render_cited_text(text: str, evidence_ids: set[int]) -> Markup:
             if int(number) in evidence_ids:
                 return f'<a class="cite" href="#E{number}">[E{number}]</a>'
             return f'<span class="cite cite-bad" title="No such evidence item">[E{number}]</span>'
-        label = "inference" if tag == "INFERENCE" else "no evidence"
-        return f'<span class="tag tag-{tag.lower()}">{label}</span>'
+        return f'<span class="tag tag-{tag.lower()}">{_LABELS[tag]}</span>'
 
-    return Markup(CITATION_TAG_RE.sub(replace, str(escape(text))))
+    return Markup(TAG_RE.sub(replace, str(escape(text))))
+
+
+def mailto_link(email: str | None, subject: str, body: str) -> str | None:
+    """Opens the user's own email app with the draft filled in; None without an address."""
+    if not email:
+        return None
+    return f"mailto:{quote(email, safe='@')}?subject={quote(subject, safe='')}&body={quote(body, safe='')}"
 
 
 def safe_http_url(url: str | None) -> str | None:

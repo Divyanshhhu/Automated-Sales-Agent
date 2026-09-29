@@ -17,6 +17,23 @@ def test_roundtrip_preserves_full_config() -> None:
     assert config == STARTER
 
 
+def test_empty_outreach_is_not_added_to_a_profile_without_one() -> None:
+    config, _ = form_to_config(config_to_form(STARTER), STARTER)
+    assert "outreach" not in config
+
+
+def test_outreach_roundtrip_keeps_multiline_signature() -> None:
+    base = {**copy.deepcopy(STARTER), "outreach": {
+        "sender_name": "Divyanshu", "signature": "Divyanshu\nFounder", "cta_label": "", "cta_url": "https://cal.com/x",
+    }}
+    form = config_to_form(base)
+    form["outreach.signature"] = "Divyanshu\r\nFounder, InvisibleCTO"
+    config, errors = form_to_config(form, base)
+    assert errors == {}
+    assert config["outreach"]["signature"] == "Divyanshu\nFounder, InvisibleCTO"
+    assert config["outreach"]["cta_url"] == "https://cal.com/x"
+
+
 def test_unknown_keys_in_base_survive_an_edit() -> None:
     base = copy.deepcopy(STARTER)
     base["icp"]["future_field"] = "keep me"

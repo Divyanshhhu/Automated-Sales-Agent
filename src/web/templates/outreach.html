@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Outreach{% endblock %}
+
+{% macro status_link(label, value) -%}
+  {%- set params = {"status": value} -%}
+  {%- if profile_id %}{% set _ = params.update({"profile_id": profile_id}) %}{% endif -%}
+  <a class="chip {% if status == value %}chip-active{% endif %}" href="/outreach?{{ params | urlencode }}">{{ label }}</a>
+{%- endmacro %}
+
+{% block content %}
+<h1>Outreach emails</h1>
+<p class="muted subhead">Emails written from approved memos. You send them yourself; nothing goes out automatically.</p>
+
+<div class="card">
+  <form class="inline-form" method="get" action="/outreach">
+    <div class="field">
+      <label for="profile_id">Profile</label>
+      <select id="profile_id" name="profile_id" onchange="this.form.submit()">
+        <option value="">All profiles</option>
+        {% for p in profiles %}
+          <option value="{{ p.id }}" {% if p.id == profile_id %}selected{% endif %}>{{ p.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <input type="hidden" name="status" value="{{ status }}">
+    <noscript><button class="btn" type="submit">Apply</button></noscript>
+  </form>
+  <div class="chips">
+    {{ status_link("All", "") }}
+    {{ status_link("To check", "draft") }}
+    {{ status_link("Ready to send", "approved") }}
+    {{ status_link("Sent", "sent") }}
+  </div>
+</div>
+
+<div class="card">
+  {% if drafts %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>To</th><th>Company</th><th>Subject</th><th>Status</th><th>Updated (UTC)</th></tr>
+      </thead>
+      <tbody>
+        {% for d in drafts %}
+        <tr>
+          <td><a href="/drafts/{{ d.id }}">{{ d.contact_name }}</a>
+            {% if d.contact_title %}<div class="muted small">{{ d.contact_title }}</div>{% endif %}</td>
+          <td>{{ d.company_name }}</td>
+          <td>{{ d.subject }}</td>
+          <td><span class="badge badge-{{ d.status }}">{{ d.status }}</span></td>
+          <td class="muted">{{ d.updated_at[:16] | replace("T", " ") }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="empty">No emails here yet. Approve a memo on the <a href="/review">Review</a> page, find people, then click “Write email”.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -54,21 +54,23 @@ def exa_search(
     # Normalize to the same shape Tavily results use (title/url/content), so
     # the filtering logic in discovery.py doesn't need to know which
     # provider produced a given result. "entity" carries the structured
-    # company properties (workforce, headquarters, description, ...) that
-    # category="company" searches return, or None when there are none.
+    # properties Exa attaches -- a company's workforce/headquarters for
+    # category="company", a person's name/workHistory for category="people"
+    # -- or None when there are none.
+    entity_type = "person" if category == "people" else "company"
     return [
         {
             "title": r.get("title", "") or "",
             "url": r.get("url", ""),
             "content": r.get("text", "") or "",
-            "entity": _first_company_entity(r),
+            "entity": _first_entity(r, entity_type),
         }
         for r in results
     ]
 
 
-def _first_company_entity(result: dict) -> dict | None:
+def _first_entity(result: dict, entity_type: str) -> dict | None:
     for entity in result.get("entities") or []:
-        if entity.get("type") == "company" and isinstance(entity.get("properties"), dict):
+        if entity.get("type") == entity_type and isinstance(entity.get("properties"), dict):
             return entity["properties"]
     return None

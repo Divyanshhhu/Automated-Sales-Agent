@@ -37,7 +37,21 @@ the main way to review. Filter and sort a profile's memos; read each one with
 clickable citations to its evidence, the ICP score breakdown and any
 citation problems; approve or reject with notes (moving on to the next memo
 automatically); regenerate a memo from the same evidence; download the CSV.
-Next: outreach drafts from approved memos (Milestone 4).
+
+**Phase 2, Milestone 4 (done):** people and outreach emails. On an approved
+memo, "Find people" runs one Exa people search for the profile's target
+roles and saves up to 5 people who *currently* work at the company in those
+roles (name, title, location, profile link — no email; add it by hand).
+"Write email" drafts a short email to one person, grounded only in the
+evidence the approved memo cited: every sentence is tagged ([E12] for a fact,
+[PRODUCT], [INFERENCE]), checked by the same citation checker as memos, then
+stripped for the version you send. The greeting, the profile's
+call-to-action link (with a per-email reference code) and the signature are
+added by code, not the model. You edit, approve, copy or open it in your
+own email app, send it yourself, and mark it sent — nothing is sent
+automatically. Contacts are personal data (India's DPDP Act): only work
+details are stored, with their source, and deleting a person deletes the
+emails written to them.
 
 ## How it works
 
@@ -172,10 +186,16 @@ discovered candidates:
   (at most one per configured location), ~$0.022 each for 25 results —
   discovery and enrichment together cost at most about 15 cents.
 - **Tavily**: 5 searches per qualifying company (one per signal category).
-- **OpenAI**: 1 call per qualifying company, ~$0.01-0.04 each on
-  `gpt-6-luna` depending on evidence volume.
+- **OpenAI**: 1 call per qualifying company — about 3,000 tokens in and
+  400 out, roughly $0.0005 each on `gpt-6-luna` ($0.10 / $0.50 per million
+  tokens, Sept 2026).
 
-Total for a real batch: typically **under $1-2**, mostly OpenAI + Tavily.
+Total for a batch of ~20 qualifying companies: roughly **$0.85**, about 90%
+of it Tavily (~100 credits at $0.008 on pay-as-you-go; on the free plan that
+is 10% of the 1,000 monthly credits).
+
+Outreach, per approved company: one Exa people search (~$0.007) and one
+OpenAI call per email (~$0.0005).
 
 Known limits of Exa's company data: it has no industry label (the ICP
 scorer matches industry keywords against the description instead), no
@@ -192,6 +212,10 @@ src/
   profiles.py         Named profiles stored in the database
   runs.py             Pipeline run records (status, stats, config snapshot)
   review.py           Memo review: list/filter, decisions, regenerate
+  contacts.py         People at a company: Exa people search + manual, DPDP-minded
+  outreach.py         Grounded email drafts: write, edit, approve, mark sent
+  citations.py        Shared citation checker (memos + emails)
+  llm.py              Shared OpenAI structured-output call with retries
   web/                Local web UI (FastAPI + Jinja2 templates + htmx)
     app.py            Routes + local-only safety checks
     forms.py          Profile form <-> config conversion, per-field errors
@@ -202,7 +226,7 @@ src/
   tavily_client.py      Shared Tavily search client
   icp_scorer.py        Deterministic ICP Fit scoring
   evidence.py          Bounded per-category evidence retrieval (Tavily)
-  memo_generator.py     LLM memo generation + citation validator (OpenAI)
+  memo_generator.py     LLM memo generation (OpenAI)
   confidence.py        Rule-based Signal Confidence assignment
   export.py            CSV export (file after each run, or UI download)
   pipeline.py          Orchestrates one run for one profile
@@ -220,9 +244,9 @@ pyproject.toml         pytest / ruff / mypy configuration
   htmx), review UI backed by the database instead of CSV, grounded email
   outreach drafts from approved memos with one configurable call-to-action
   link (human still sends). Milestones 1 (profiles in the database,
-  per-profile results, run tracking), 2 (web UI for profiles and runs) and
-  3 (memo review UI) are done.
-- **Phase 3**: decision-maker/contact enrichment; reply classification;
+  per-profile results, run tracking), 2 (web UI for profiles and runs),
+  3 (memo review UI) and 4 (people + outreach email drafts) are done.
+- **Phase 3**: email-address enrichment; reply classification;
   unified-context integration with the existing WhatsApp/voice sales agent.
 - **Phase 4**: automated sending with guardrails, broader signal sources,
   feedback loop from real conversion outcomes back into ICP/confidence

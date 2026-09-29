@@ -71,6 +71,30 @@ def test_taxonomy_template_with_unknown_placeholder(valid_config: dict) -> None:
         validate_config(valid_config)
 
 
+def test_outreach_section_is_optional_and_may_be_empty(valid_config: dict) -> None:
+    validate_config(valid_config)
+    valid_config["outreach"] = {"sender_name": "", "signature": "", "cta_label": "", "cta_url": ""}
+    validate_config(valid_config)
+    valid_config["outreach"]["cta_url"] = "https://calendly.com/me/15min"
+    validate_config(valid_config)
+
+
+@pytest.mark.parametrize(
+    ("outreach", "fragment"),
+    [
+        ({"cta_url": "calendly.com/me"}, "outreach.cta_url"),
+        ({"cta_url": "javascript:alert(1)"}, "outreach.cta_url"),
+        ({"signature": 42}, "outreach.signature"),
+        ({"sender_name": "x" * 1001}, "outreach.sender_name"),
+        ("not an object", "outreach must be an object"),
+    ],
+)
+def test_bad_outreach_section(valid_config: dict, outreach: object, fragment: str) -> None:
+    valid_config["outreach"] = outreach
+    with pytest.raises(ConfigError, match=fragment):
+        validate_config(valid_config)
+
+
 def test_load_config_missing_file(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="not found"):
         load_config(str(tmp_path / "nope.json"))

@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Email to {{ draft.contact_name }}{% endblock %}
+{% block content %}
+{% set ids = evidence | map(attribute="id") | list %}
+<div class="page-head">
+  <h1>Email to {{ draft.contact_name }}</h1>
+  <div class="actions">
+    <a class="btn" href="/memos/{{ draft.memo_id }}#people">Back to memo</a>
+    <a class="btn" href="/outreach">All emails</a>
+  </div>
+</div>
+<p class="muted subhead">
+  {{ draft.contact_title or "" }}{% if draft.contact_title %} · {% endif %}{{ draft.company_name }}
+  · {% if draft.contact_email %}{{ draft.contact_email }}{% else %}no email address yet{% endif %}
+  · ref <code>{{ draft.ref_code }}</code>
+</p>
+
+{% if notice %}<div class="notice notice-ok" role="status">{{ notice }}</div>{% endif %}
+{% if error %}<div class="notice notice-error" role="alert">{{ error }}</div>{% endif %}
+
+<div class="memo-layout">
+  <div>
+    <div class="card">
+      <div class="memo-meta">
+        <span class="badge badge-{{ draft.status }}">{{ draft.status }}</span>
+        {% if draft.sent_at %}<span class="muted small">sent {{ draft.sent_at[:16] | replace("T", " ") }} UTC</span>
+        {% elif draft.approved_at %}<span class="muted small">approved {{ draft.approved_at[:16] | replace("T", " ") }} UTC</span>{% endif %}
+      </div>
+      <form method="post" action="/drafts/{{ draft.id }}">
+        <div class="field">
+          <label for="subject">Subject</label>
+          <input id="subject" type="text" name="subject" value="{{ draft.subject }}" maxlength="150" required
+                 {% if draft.status == "sent" %}readonly{% endif %}>
+        </div>
+        <div class="field">
+          <label for="body">Email</label>
+          <textarea id="body" name="body" class="email-body" maxlength="5000" required
+                    {% if draft.status == "sent" %}readonly{% endif %}>{{ draft.body }}</textarea>
+        </div>
+        {% if draft.status != "sent" %}
+          <div class="actions">
+            <button class="btn" type="submit">Save changes</button>
+            {% if draft.status == "approved" %}<span class="muted small">Saving changes will need a fresh approval.</span>{% endif %}
+          </div>
+        {% endif %}
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Where each sentence came from</h2>
+      <p class="muted small">The model's version before tags were removed. Numbered links point to the evidence
+        below; everything else is marked as being about your product or as a connection it drew.</p>
+      <p class="memo-text">{{ draft.generated_body | cited(ids) }}</p>
+      {% if draft.citation_issues %}
+        <div class="notice notice-error" role="alert">
+          <strong>Check these before approving:</strong>
+          <ul>{% for issue in draft.citation_issues %}<li>{{ issue }}</li>{% endfor %}</ul>
+        </div>
+      {% endif %}
+      {% for e in evidence %}
+        <div class="evidence" id="E{{ e.id }}">
+          <div class="evidence-head"><strong>E{{ e.id }}</strong>
+            <span class="muted">{{ e.category | replace("_", " ") }}</span></div>
+          <p>{{ e.fact_text }}</p>
+          {% set url = e.source_url | safe_url %}
+          {% if url %}<a class="small path" href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ url }}</a>{% endif %}
+        </div>
+      {% else %}
+        <p class="empty">The approved memo cites no evidence, so the email relies on your product description only.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <aside>
+    <div class="card">
+      <h2>Next step</h2>
+      {% if draft.status == "draft" %}
+        <p class="small">Read it, edit if needed, then approve it.</p>
+        <form method="post" action="/drafts/{{ draft.id }}/approve">
+          <button class="btn btn-primary" type="submit">Approve email</button>
+        </form>
+      {% elif draft.status == "approved" %}
+        <p class="small">Send it from your own email, then mark it as sent. Nothing is sent automatically.</p>
+        <div class="stack">
+          {% if mailto %}<a class="btn btn-primary" href="{{ mailto }}">Open in my email app</a>{% endif %}
+          <button class="btn" type="button" id="copy-email">Copy subject and email</button>
+          <form method="post" action="/drafts/{{ draft.id }}/sent">
+            <button class="btn" type="submit">Mark as sent</button>
+          </form>
+        </div>
+        {% if not mailto %}<p class="muted small">Add their email address on the memo page to open this in your email app.</p>{% endif %}
+      {% else %}
+        <p class="small">Sent. When they reply or book, the reference <code>{{ draft.ref_code }}</code> tells you it came from this email.</p>
+      {% endif %}
+    </div>
+
+    {% if draft.status != "sent" %}
+    <div class="card">
+      <h2>Rewrite</h2>
+      <p class="muted small">Writes a new version from the same memo and evidence (one OpenAI call).
+        Replaces your edits and clears the approval.</p>
+      <form method="post" action="/drafts/{{ draft.id }}/regenerate"
+            data-confirm="Replace this email with a new version?">
+        <button class="btn" type="submit">Rewrite email</button>
+      </form>
+    </div>
+    {% endif %}
+  </aside>
+</div>
+
+<script>
+  (function () {
+    var button = document.getElementById("copy-email");
+    if (!button) return;
+    button.addEventListener("click", function () {
+      var text = "Subject: " + document.getElementById("subject").value + "\n\n" + document.getElementById("body").value;
+      navigator.clipboard.writeText(text).then(function () {
+        button.textContent = "Copied";
+        setTimeout(function () { button.textContent = "Copy subject and email"; }, 2000);
+      });
+    });
+  })();
+</script>
+{% endblock %}

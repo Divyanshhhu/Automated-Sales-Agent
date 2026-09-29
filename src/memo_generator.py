@@ -8,23 +8,12 @@ that check, not the prompt wording, is what makes hallucination structurally
 hard rather than merely discouraged.
 """
 import json
-import os
-import re
 from dataclasses import dataclass
 
-from openai import (
-    APIConnectionError,
-    APITimeoutError,
-    InternalServerError,
-    OpenAI,
-    RateLimitError,
-)
-
+from .citations import extract_cited_evidence_ids, validate_tagged_sentences
 from .confidence import assign_confidence
 from .db import get_connection, utc_now
-from .retry import call_with_retry
-
-MODEL = os.environ.get("OPENAI_MODEL", "gpt-6-luna")
+from .llm import call_structured
 
 MEMO_SCHEMA = {
     "type": "object",
@@ -68,7 +57,6 @@ def _format_evidence(evidence_items: list[dict]) -> str:
 
 
 def _call_llm(product: dict, company_row, evidence_items: list[dict]) -> dict:
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     user_content = f"""PRODUCT:
 Name: {product['name']}
 Description: {product['description']}
@@ -86,52 +74,13 @@ EVIDENCE:
 {_format_evidence(evidence_items)}
 """
 
-    def _do_call():
-        return client.responses.create(
-            model=MODEL,
-            instructions=SYSTEM_PROMPT,
-            input=user_content,
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": "research_memo",
-                    "strict": True,
-                    "schema": MEMO_SCHEMA,
-                }
-            },
-        )
-
-    response = call_with_retry(
-        _do_call,
-        is_retriable=_is_retriable_openai_error,
+    return call_structured(
+        instructions=SYSTEM_PROMPT,
+        user_content=user_content,
+        schema=MEMO_SCHEMA,
+        schema_name="research_memo",
         context=f"OpenAI memo generation for {company_row['name']!r}",
     )
-    return json.loads(response.output_text)
-
-
-def _is_retriable_openai_error(exc: Exception) -> bool:
-    return isinstance(exc, (APITimeoutError, APIConnectionError, RateLimitError, InternalServerError))
-
-
-CITATION_TAG_RE = re.compile(r"\[(E(\d+)|INFERENCE|NO_EVIDENCE)\]")
-
-# A bare sentence-boundary split on "." breaks abbreviations like "51 million
-# sq. ft." into fragments, each missing the citation tag that only sits at
-# the true sentence end -- a live batch flagged 4 false "uncited claim"
-# issues on one fully-cited sentence for exactly this reason. Protect known
-# abbreviations before splitting, restore them after.
-_ABBREVIATIONS = ("sq.", "ft.", "rs.", "no.", "approx.", "etc.", "vs.", "e.g.", "i.e.", "mr.", "dr.")
-
-
-def _protect_abbreviations(text: str) -> str:
-    protected = text
-    for abbr in _ABBREVIATIONS:
-        protected = re.sub(re.escape(abbr), abbr.replace(".", "․"), protected, flags=re.IGNORECASE)
-    return protected
-
-
-def _restore_abbreviations(text: str) -> str:
-    return text.replace("․", ".")
 
 
 def validate_citations(text: str, valid_evidence_ids: set[int]) -> list[str]:
@@ -139,28 +88,7 @@ def validate_citations(text: str, valid_evidence_ids: set[int]) -> list[str]:
 
     Returns a list of human-readable issues; empty list means the memo passed.
     """
-    issues = []
-    sentences = [
-        _restore_abbreviations(s)
-        for s in re.split(r"(?<=[.!?])\s+", _protect_abbreviations(text.strip()))
-    ]
-    for sentence in sentences:
-        if not sentence.strip():
-            continue
-        tags = CITATION_TAG_RE.findall(sentence)
-        if not tags:
-            issues.append(f"Uncited claim: \"{sentence.strip()}\"")
-            continue
-        for _full_tag, e_num in tags:
-            if e_num and int(e_num) not in valid_evidence_ids:
-                issues.append(
-                    f"Citation references non-existent evidence id E{e_num}: \"{sentence.strip()}\""
-                )
-    return issues
-
-
-def extract_cited_evidence_ids(text: str) -> set[int]:
-    return {int(num) for _, num in CITATION_TAG_RE.findall(text) if num}
+    return validate_tagged_sentences(text, valid_evidence_ids)
 
 
 @dataclass(frozen=True)

@@ -18,13 +18,34 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from starlette.datastructures import UploadFile
+from starlette.datastructures import FormData, UploadFile
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from ..config import ConfigError, load_config, validate_config
+from ..contacts import (
+    ContactNotFoundError,
+    ContactValidationError,
+    add_manual_contact,
+    delete_contact,
+    find_people,
+    get_contact,
+    list_contacts,
+    update_contact,
+)
 from ..db import DEFAULT_PROFILE_PATH
 from ..export import filename_slug, write_memos_csv
 from ..icp_scorer import WEIGHTS
+from ..outreach import (
+    DraftNotFoundError,
+    OutreachError,
+    approve_draft,
+    drafts_for_memo,
+    generate_draft,
+    get_draft,
+    list_drafts,
+    mark_sent,
+    update_draft,
+)
 from ..profiles import (
     InvalidProfileNameError,
     ProfileExistsError,
@@ -50,7 +71,7 @@ from ..review import (
 from ..runs import RunNotFoundError, fail_orphaned_runs, get_run, list_runs
 from . import runner
 from .forms import FORM_ERROR, config_to_form, form_to_config, group_errors
-from .rendering import render_cited_text, safe_http_url
+from .rendering import mailto_link, render_cited_text, safe_http_url
 
 logger = logging.getLogger("sales_agent")
 
@@ -81,6 +102,30 @@ def _unique_copy_name(name: str) -> str:
     while candidate in existing:
         candidate, n = f"{name} (copy {n})", n + 1
     return candidate
+
+
+CONTACT_NOTICES = {
+    "added": "Person added.",
+    "saved": "Person updated.",
+    "deleted": "Person deleted, along with any emails written to them.",
+}
+DRAFT_NOTICES = {
+    "written": "Email written. Check it, edit if needed, then approve it.",
+    "saved": "Changes saved.",
+    "approved": "Email approved. Copy it or open it in your email app, send it, then mark it as sent.",
+    "sent": "Marked as sent.",
+}
+
+
+def _people_notice(added: str, known: str) -> str:
+    also = f" ({known} already saved)" if known != "0" else ""
+    if added == "0":
+        return f"No new people found in the target roles{also}. You can add someone manually below."
+    return f"Found {added} new {'person' if added == '1' else 'people'} to contact{also}."
+
+
+def _contact_fields(form: FormData) -> dict[str, str]:
+    return {key: str(form.get(key, "")) for key in ("name", "title", "email", "profile_url")}
 
 
 def _parse_limit(text: str) -> int | None:
@@ -338,10 +383,22 @@ def create_app(*, allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS) -> Fas
             notice = "Memo regenerated from the stored evidence. Review it again below."
         elif request.query_params.get("saved"):
             notice = "Review saved."
+        elif request.query_params.get("people") is not None:
+            params = request.query_params
+            notice = _people_notice(params.get("people", "0"), params.get("known", "0"))
+        elif request.query_params.get("contact"):
+            notice = CONTACT_NOTICES.get(request.query_params["contact"])
         return templates.TemplateResponse(
             request,
             "memo_detail.html",
-            {"memo": memo, "notice": notice, "error": error, "weights": WEIGHTS},
+            {
+                "memo": memo,
+                "notice": notice,
+                "error": error,
+                "weights": WEIGHTS,
+                "contacts": list_contacts(memo.company["id"]),
+                "drafts": drafts_for_memo(memo.id),
+            },
             status_code=status_code,
         )
 
@@ -391,6 +448,145 @@ def create_app(*, allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS) -> Fas
             },
         )
 
+    # ---------- people ----------
+
+    @app.post("/memos/{memo_id:int}/find-people")
+    def find_people_route(request: Request, memo_id: int) -> Response:
+        memo = get_memo(memo_id)
+        if memo.review_status != "approved":
+            return render_memo(
+                request, memo_id, error="Approve the memo before finding people", status_code=409
+            )
+        roles = get_profile(memo.profile_id).config["icp"].get("roles") or []
+        try:
+            result = find_people(memo.company["id"], memo.company["name"], memo.company["city"], roles)
+        except Exception as exc:  # external search: show the failure, change nothing
+            logger.exception("Finding people for memo %d failed", memo_id)
+            return render_memo(request, memo_id, error=f"People search failed: {exc}", status_code=502)
+        return RedirectResponse(
+            f"/memos/{memo_id}?people={len(result.added)}&known={result.already_saved}#people",
+            status_code=303,
+        )
+
+    @app.post("/memos/{memo_id:int}/contacts")
+    async def add_contact_route(request: Request, memo_id: int) -> Response:
+        memo = get_memo(memo_id)
+        try:
+            add_manual_contact(memo.company["id"], **_contact_fields(await request.form()))
+        except ContactValidationError as exc:
+            return render_memo(request, memo_id, error=str(exc), status_code=422)
+        return RedirectResponse(f"/memos/{memo_id}?contact=added#people", status_code=303)
+
+    @app.post("/memos/{memo_id:int}/contacts/{contact_id:int}")
+    async def update_contact_route(request: Request, memo_id: int, contact_id: int) -> Response:
+        get_memo(memo_id)
+        try:
+            update_contact(contact_id, **_contact_fields(await request.form()))
+        except ContactValidationError as exc:
+            return render_memo(request, memo_id, error=str(exc), status_code=422)
+        return RedirectResponse(f"/memos/{memo_id}?contact=saved#people", status_code=303)
+
+    @app.post("/memos/{memo_id:int}/contacts/{contact_id:int}/delete")
+    def delete_contact_route(memo_id: int, contact_id: int) -> Response:
+        get_memo(memo_id)
+        delete_contact(contact_id)
+        return RedirectResponse(f"/memos/{memo_id}?contact=deleted#people", status_code=303)
+
+    # ---------- outreach drafts ----------
+
+    @app.post("/memos/{memo_id:int}/contacts/{contact_id:int}/draft")
+    def write_draft(request: Request, memo_id: int, contact_id: int) -> Response:
+        get_memo(memo_id)
+        get_contact(contact_id)  # 404 before spending an LLM call
+        try:
+            draft = generate_draft(memo_id, contact_id)
+        except OutreachError as exc:
+            return render_memo(request, memo_id, error=str(exc), status_code=409)
+        except Exception as exc:  # external LLM call
+            logger.exception("Writing email for memo %d, contact %d failed", memo_id, contact_id)
+            return render_memo(request, memo_id, error=f"Writing the email failed: {exc}", status_code=502)
+        return RedirectResponse(f"/drafts/{draft.id}?done=written", status_code=303)
+
+    def render_draft(
+        request: Request,
+        draft_id: int,
+        *,
+        error: str | None = None,
+        status_code: int = 200,
+    ) -> HTMLResponse:
+        draft = get_draft(draft_id)
+        memo = get_memo(draft.memo_id)
+        return templates.TemplateResponse(
+            request,
+            "draft_detail.html",
+            {
+                "draft": draft,
+                "memo": memo,
+                "evidence": [e for e in memo.evidence if e["cited"]],
+                "mailto": mailto_link(draft.contact_email, draft.subject, draft.body),
+                "notice": DRAFT_NOTICES.get(request.query_params.get("done", "")),
+                "error": error,
+            },
+            status_code=status_code,
+        )
+
+    @app.get("/drafts/{draft_id:int}", response_class=HTMLResponse)
+    def draft_page(request: Request, draft_id: int) -> HTMLResponse:
+        return render_draft(request, draft_id)
+
+    @app.post("/drafts/{draft_id:int}")
+    async def save_draft(request: Request, draft_id: int) -> Response:
+        form = await request.form()
+        try:
+            update_draft(draft_id, subject=str(form.get("subject", "")), body=str(form.get("body", "")))
+        except OutreachError as exc:
+            return render_draft(request, draft_id, error=str(exc), status_code=409)
+        return RedirectResponse(f"/drafts/{draft_id}?done=saved", status_code=303)
+
+    @app.post("/drafts/{draft_id:int}/approve")
+    def approve_draft_route(request: Request, draft_id: int) -> Response:
+        try:
+            approve_draft(draft_id)
+        except OutreachError as exc:
+            return render_draft(request, draft_id, error=str(exc), status_code=409)
+        return RedirectResponse(f"/drafts/{draft_id}?done=approved", status_code=303)
+
+    @app.post("/drafts/{draft_id:int}/sent")
+    def mark_sent_route(request: Request, draft_id: int) -> Response:
+        try:
+            mark_sent(draft_id)
+        except OutreachError as exc:
+            return render_draft(request, draft_id, error=str(exc), status_code=409)
+        return RedirectResponse(f"/drafts/{draft_id}?done=sent", status_code=303)
+
+    @app.post("/drafts/{draft_id:int}/regenerate")
+    def regenerate_draft(request: Request, draft_id: int) -> Response:
+        draft = get_draft(draft_id)
+        try:
+            generate_draft(draft.memo_id, draft.contact_id)
+        except OutreachError as exc:
+            return render_draft(request, draft_id, error=str(exc), status_code=409)
+        except Exception as exc:  # external LLM call: the old draft stays
+            logger.exception("Rewriting draft %d failed", draft_id)
+            return render_draft(
+                request, draft_id, error=f"Rewriting failed, the draft is unchanged: {exc}", status_code=502
+            )
+        return RedirectResponse(f"/drafts/{draft_id}?done=written", status_code=303)
+
+    @app.get("/outreach", response_class=HTMLResponse)
+    def outreach_page(request: Request, profile_id: int | None = None, status: str = "") -> HTMLResponse:
+        status = status if status in ("draft", "approved", "sent") else ""
+        return templates.TemplateResponse(
+            request,
+            "outreach.html",
+            {
+                "drafts": list_drafts(profile_id, status or None),
+                "profiles": list_profiles(),
+                "profile_id": profile_id,
+                "status": status,
+            },
+        )
+
     # ---------- errors ----------
 
     async def not_found(request: Request, exc: Exception) -> HTMLResponse:
@@ -399,5 +595,7 @@ def create_app(*, allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS) -> Fas
     app.add_exception_handler(ProfileNotFoundError, not_found)
     app.add_exception_handler(RunNotFoundError, not_found)
     app.add_exception_handler(MemoNotFoundError, not_found)
+    app.add_exception_handler(ContactNotFoundError, not_found)
+    app.add_exception_handler(DraftNotFoundError, not_found)
 
     return app

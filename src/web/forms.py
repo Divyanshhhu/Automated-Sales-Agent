@@ -22,9 +22,12 @@ LIST_FIELDS = (
     "icp.roles",
 )
 TEXT_FIELDS = ("product.name", "product.description", "product.problem_solved", "product.pricing")
+# optional section: only written to the config if something is filled in
+OUTREACH_FIELDS = ("outreach.sender_name", "outreach.signature", "outreach.cta_label", "outreach.cta_url")
 # where each form field's errors are shown; employee min/max share one
 ERROR_FIELDS = (
     *TEXT_FIELDS,
+    *OUTREACH_FIELDS,
     *LIST_FIELDS,
     "icp.employee_range",
     "icp.min_icp_fit_score",
@@ -53,7 +56,7 @@ def _set(config: dict, path: str, value: object) -> None:
 def config_to_form(config: dict) -> dict[str, str]:
     """Current values for every form input, as strings."""
     values: dict[str, str] = {}
-    for path in TEXT_FIELDS:
+    for path in (*TEXT_FIELDS, *OUTREACH_FIELDS):
         value = _get(config, path)
         values[path] = value if isinstance(value, str) else ""
     for path in LIST_FIELDS:
@@ -93,6 +96,11 @@ def form_to_config(form: Mapping[str, str], base: dict) -> tuple[dict, dict[str,
 
     for path in TEXT_FIELDS:
         _set(config, path, form.get(path, "").strip())
+    outreach = {
+        path.split(".", 1)[1]: form.get(path, "").replace("\r\n", "\n").strip() for path in OUTREACH_FIELDS
+    }
+    if any(outreach.values()) or "outreach" in base:
+        config["outreach"] = {**(base.get("outreach") or {}), **outreach}
     for path in LIST_FIELDS:
         _set(config, path, _lines(form.get(path, "")))
 

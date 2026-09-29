@@ -59,7 +59,9 @@ def _tables(conn: sqlite3.Connection) -> set[str]:
 def test_fresh_database_is_fully_migrated(temp_db: Path) -> None:
     conn = db.get_connection()
     assert conn.execute("PRAGMA user_version").fetchone()[0] == len(db.MIGRATIONS)
-    assert {"profiles", "runs", "companies", "company_scores", "evidence_items", "memos"} <= _tables(conn)
+    expected_tables = {"profiles", "runs", "companies", "company_scores", "evidence_items", "memos"}
+    expected_tables |= {"contacts", "outreach_drafts"}
+    assert expected_tables <= _tables(conn)
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     # no legacy data -> no Default profile invented

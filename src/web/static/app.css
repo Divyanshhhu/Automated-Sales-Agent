@@ -187,6 +187,27 @@ code, .path { font-family: ui-monospace, Consolas, monospace; font-size: 13px; w
 }
 .breakdown meter { flex: 1; min-width: 0; }
 
+/* ---------- people & outreach ---------- */
+.badge-draft { background: var(--warn-bg); color: var(--warn); }
+.badge-sent { background: var(--ok-bg); color: var(--ok); }
+.contact {
+  display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 12px 0; border-top: 1px solid var(--border);
+}
+.contact-main { min-width: 0; }
+.stack { display: grid; gap: 8px; }
+.stack input {
+  font: inherit; padding: 6px 8px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--bg); color: var(--text);
+}
+.inline-details summary { list-style: none; }
+.inline-details summary::-webkit-details-marker { display: none; }
+.inline-details[open] { flex-basis: 100%; }
+.add-person { margin-top: 14px; }
+.add-person summary { cursor: pointer; color: var(--accent); font-size: 14px; }
+.add-person form { margin-top: 10px; max-width: 420px; }
+.email-body { min-height: 320px; font-family: inherit; line-height: 1.6; }
+
 @media (max-width: 860px) {
   .memo-layout { grid-template-columns: 1fr; }
 }

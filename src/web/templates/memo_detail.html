@@ -44,6 +44,76 @@
     </div>
     {% endif %}
 
+    <div class="card" id="people">
+      <div class="page-head">
+        <h2>People &amp; emails</h2>
+        {% if memo.review_status == "approved" %}
+          <form method="post" action="/memos/{{ memo.id }}/find-people">
+            <button class="btn btn-primary" type="submit">Find people</button>
+          </form>
+        {% endif %}
+      </div>
+      {% if memo.review_status == "approved" %}
+        <p class="muted small">“Find people” searches for current employees in your profile's target roles
+          (one search, about $0.007) and saves up to 5. Emails aren't included — add them with “Edit”.</p>
+      {% else %}
+        <p class="muted small">Approve this memo to find people at {{ memo.company.name }} and write emails to them.</p>
+      {% endif %}
+
+      {% for c in contacts %}
+        {% set d = drafts.get(c.id) %}
+        <div class="contact">
+          <div class="contact-main">
+            <strong>{{ c.name }}</strong>
+            {% if c.title %}<span class="muted"> · {{ c.title }}</span>{% endif %}
+            <div class="small muted">
+              {% if c.email %}{{ c.email }}{% else %}no email yet{% endif %}
+              {% if c.location %} · {{ c.location }}{% endif %}
+              {% set profile_link = c.profile_url | safe_url %}
+              {% if profile_link %} · <a href="{{ profile_link }}" target="_blank" rel="noopener noreferrer">profile</a>{% endif %}
+              · {{ "found by search" if c.source == "exa_people" else "added by you" }}
+            </div>
+          </div>
+          <div class="actions">
+            {% if d %}
+              <a class="btn btn-small" href="/drafts/{{ d.id }}">Email: <span class="badge badge-{{ d.status }}">{{ d.status }}</span></a>
+            {% elif memo.review_status == "approved" %}
+              <form method="post" action="/memos/{{ memo.id }}/contacts/{{ c.id }}/draft">
+                <button class="btn btn-small btn-primary" type="submit">Write email</button>
+              </form>
+            {% endif %}
+            <details class="inline-details">
+              <summary class="btn btn-small">Edit</summary>
+              <form class="stack" method="post" action="/memos/{{ memo.id }}/contacts/{{ c.id }}">
+                <input type="text" name="name" value="{{ c.name }}" aria-label="Name" required maxlength="200">
+                <input type="text" name="title" value="{{ c.title or '' }}" aria-label="Title" placeholder="Title" maxlength="200">
+                <input type="email" name="email" value="{{ c.email or '' }}" aria-label="Email" placeholder="Email" maxlength="200">
+                <input type="text" name="profile_url" value="{{ c.profile_url or '' }}" aria-label="Profile link" placeholder="https://…" maxlength="500">
+                <button class="btn btn-small" type="submit">Save</button>
+              </form>
+            </details>
+            <form method="post" action="/memos/{{ memo.id }}/contacts/{{ c.id }}/delete"
+                  data-confirm="Delete {{ c.name }} and any emails written to them?">
+              <button class="btn btn-small btn-danger" type="submit">Delete</button>
+            </form>
+          </div>
+        </div>
+      {% else %}
+        {% if memo.review_status == "approved" %}<p class="empty">No people saved for this company yet.</p>{% endif %}
+      {% endfor %}
+
+      <details class="add-person">
+        <summary>Add a person manually</summary>
+        <form class="stack" method="post" action="/memos/{{ memo.id }}/contacts">
+          <input type="text" name="name" aria-label="Name" placeholder="Full name" required maxlength="200">
+          <input type="text" name="title" aria-label="Title" placeholder="Title, e.g. Head of Sales" maxlength="200">
+          <input type="email" name="email" aria-label="Email" placeholder="Work email" maxlength="200">
+          <input type="text" name="profile_url" aria-label="Profile link" placeholder="LinkedIn link (optional)" maxlength="500">
+          <button class="btn btn-small" type="submit">Add person</button>
+        </form>
+      </details>
+    </div>
+
     <div class="card">
       <h2>Evidence ({{ memo.evidence | length }})</h2>
       {% for e in memo.evidence %}
