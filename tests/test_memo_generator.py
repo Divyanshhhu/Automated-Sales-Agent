@@ -6,6 +6,7 @@ from src import memo_generator
 from src.confidence import LABELS, assign_confidence
 from src.db import get_connection
 from src.memo_generator import build_memo, validate_citations
+from src.profiles import Profile
 
 PRODUCT = {"name": "P", "description": "D", "problem_solved": "S", "differentiators": ["X"]}
 
@@ -50,7 +51,7 @@ def test_assign_confidence(categories: set[str], expected: str) -> None:
 
 
 def test_build_memo_confidence_uses_only_cited_evidence(
-    company_row: dict, monkeypatch: pytest.MonkeyPatch
+    profile: Profile, company_row: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     evidence_items = [
         {"id": 1, "category": "expansion_launch", "fact_text": "launch", "source_url": "u1"},
@@ -62,7 +63,7 @@ def test_build_memo_confidence_uses_only_cited_evidence(
         "_call_llm",
         lambda *_: {"why_relevant": "New launch [E1].", "potential_use_case": "Handle leads [INFERENCE]."},
     )
-    memo = build_memo(PRODUCT, company_row, evidence_items)
+    memo = build_memo(PRODUCT, company_row, evidence_items, profile_id=profile.id, run_id=None)
     assert memo["signal_confidence"] == LABELS["plausible"]
     assert memo["issues"] == []
 
@@ -74,14 +75,14 @@ def test_build_memo_confidence_uses_only_cited_evidence(
 
 
 def test_build_memo_with_citation_issues_needs_review(
-    company_row: dict, monkeypatch: pytest.MonkeyPatch
+    profile: Profile, company_row: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         memo_generator,
         "_call_llm",
         lambda *_: {"why_relevant": "They are growing.", "potential_use_case": "Leads [E5]."},
     )
-    memo = build_memo(PRODUCT, company_row, [])
+    memo = build_memo(PRODUCT, company_row, [], profile_id=profile.id, run_id=None)
     assert len(memo["issues"]) == 2
     assert memo["signal_confidence"] == LABELS["weak"]
 

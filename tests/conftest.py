@@ -4,8 +4,9 @@ from pathlib import Path
 import pytest
 
 from src import db
+from src.profiles import Profile, create_profile
 
-VALID_CONFIG = {
+VALID_CONFIG: dict = {
     "product": {
         "name": "Test Product",
         "description": "A test product.",
@@ -39,17 +40,45 @@ def temp_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
-def company_row(temp_db: Path) -> dict:
+def profile(temp_db: Path) -> Profile:
+    return create_profile("Test", copy.deepcopy(VALID_CONFIG))
+
+
+def insert_company(company_id: str = "c1", name: str = "Acme Realty", employee_count: int = 200,
+                   city: str = "Mumbai", description: str = "A realty firm") -> None:
     conn = db.get_connection()
     conn.execute(
         """
         INSERT INTO companies (id, name, domain, employee_count, industry, city, state, country,
-                               short_description, icp_fit_score, icp_fit_label)
-        VALUES ('c1', 'Acme Realty', 'acme.in', 200, 'real estate', 'Mumbai', 'Maharashtra', 'India',
-                'A realty firm', 100.0, 'High')
-        """
+                               short_description, raw_json, discovered_at)
+        VALUES (?, ?, ?, ?, NULL, ?, NULL, 'India', ?, '{}', '2026-01-01')
+        """,
+        (company_id, name, f"{company_id}.in", employee_count, city, description),
     )
     conn.commit()
-    row = dict(conn.execute("SELECT * FROM companies WHERE id='c1'").fetchone())
+    conn.close()
+
+
+@pytest.fixture
+def company_row(profile: Profile) -> dict:
+    """A company scored under `profile`, shaped like the pipeline's qualifying rows."""
+    insert_company()
+    conn = db.get_connection()
+    conn.execute(
+        """
+        INSERT INTO company_scores (profile_id, company_id, score, label, breakdown_json, scored_at)
+        VALUES (?, 'c1', 100.0, 'High', '{}', '2026-01-01')
+        """,
+        (profile.id,),
+    )
+    conn.commit()
+    row = dict(
+        conn.execute(
+            """
+            SELECT c.*, s.score AS icp_fit_score, s.label AS icp_fit_label
+            FROM companies c JOIN company_scores s ON s.company_id = c.id WHERE c.id = 'c1'
+            """
+        ).fetchone()
+    )
     conn.close()
     return row

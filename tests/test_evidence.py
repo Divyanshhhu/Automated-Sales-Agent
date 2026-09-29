@@ -1,11 +1,10 @@
-from pathlib import Path
-
 import pytest
 import requests
 
 from src import evidence
 from src.db import get_connection
 from src.evidence import _is_genuine_pain_point, get_evidence_for_company, retrieve_evidence_for_company
+from src.profiles import Profile
 
 TAXONOMY = {
     "expansion_launch": "{company} launch",
@@ -60,52 +59,56 @@ def _evidence_count(company_id: str) -> int:
     return count
 
 
-def test_retrieval_stores_results(temp_db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_retrieval_stores_results(
+    profile: Profile, company_row: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(evidence, "tavily_search", FakeTavily())
-    assert retrieve_evidence_for_company("c1", "Acme", TAXONOMY) == 4
-    categories = {e["category"] for e in get_evidence_for_company("c1")}
+    assert retrieve_evidence_for_company(profile.id, "c1", "Acme", TAXONOMY) == 4
+    categories = {e["category"] for e in get_evidence_for_company(profile.id, "c1")}
     assert categories == {"expansion_launch", "direct_pain_point"}
 
 
-def test_rerun_does_not_duplicate_or_requery(temp_db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rerun_does_not_duplicate_or_requery(
+    profile: Profile, company_row: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fake = FakeTavily()
     monkeypatch.setattr(evidence, "tavily_search", fake)
-    retrieve_evidence_for_company("c1", "Acme", TAXONOMY)
+    retrieve_evidence_for_company(profile.id, "c1", "Acme", TAXONOMY)
     queries_after_first_run = len(fake.queries)
 
-    assert retrieve_evidence_for_company("c1", "Acme", TAXONOMY) == 0
+    assert retrieve_evidence_for_company(profile.id, "c1", "Acme", TAXONOMY) == 0
     assert _evidence_count("c1") == 4
     assert len(fake.queries) == queries_after_first_run  # no Tavily credits spent on the rerun
 
 
 def test_rerun_after_partial_failure_fills_only_the_gap(
-    temp_db: Path, monkeypatch: pytest.MonkeyPatch
+    profile: Profile, company_row: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(evidence, "tavily_search", FakeTavily(fail_for={"complaint"}))
-    assert retrieve_evidence_for_company("c1", "Acme", TAXONOMY) == 2
+    assert retrieve_evidence_for_company(profile.id, "c1", "Acme", TAXONOMY) == 2
 
     recovered = FakeTavily()
     monkeypatch.setattr(evidence, "tavily_search", recovered)
-    assert retrieve_evidence_for_company("c1", "Acme", TAXONOMY) == 2
+    assert retrieve_evidence_for_company(profile.id, "c1", "Acme", TAXONOMY) == 2
     assert recovered.queries == ["Acme complaint"]
     assert _evidence_count("c1") == 4
 
 
 def test_duplicate_url_within_category_is_ignored(
-    temp_db: Path, monkeypatch: pytest.MonkeyPatch
+    profile: Profile, company_row: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def same_url_twice(query: str, max_results: int = 5, **_: object) -> list[dict]:
         return [{"content": "launch news", "url": "https://same"}] * 2
 
     monkeypatch.setattr(evidence, "tavily_search", same_url_twice)
-    assert retrieve_evidence_for_company("c1", "Acme", {"expansion_launch": "{company}"}) == 1
+    assert retrieve_evidence_for_company(profile.id, "c1", "Acme", {"expansion_launch": "{company}"}) == 1
 
 
 def test_non_genuine_pain_point_results_are_filtered(
-    temp_db: Path, monkeypatch: pytest.MonkeyPatch
+    profile: Profile, company_row: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def launch_news(query: str, max_results: int = 5, **_: object) -> list[dict]:
         return [{"content": "The company launched a new tower.", "url": "https://news"}]
 
     monkeypatch.setattr(evidence, "tavily_search", launch_news)
-    assert retrieve_evidence_for_company("c1", "Acme", {"direct_pain_point": "{company}"}) == 0
+    assert retrieve_evidence_for_company(profile.id, "c1", "Acme", {"direct_pain_point": "{company}"}) == 0

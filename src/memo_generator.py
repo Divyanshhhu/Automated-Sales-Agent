@@ -163,7 +163,13 @@ def _extract_cited_evidence_ids(text: str) -> set[int]:
     return {int(num) for _, num in CITATION_TAG_RE.findall(text) if num}
 
 
-def build_memo(product: dict, company_row, evidence_items: list[dict]) -> dict:
+def build_memo(
+    product: dict, company_row, evidence_items: list[dict], *, profile_id: int, run_id: int | None
+) -> dict:
+    """company_row must carry the profile's icp_fit_score / icp_fit_label
+    (the pipeline joins them in from company_scores); they're snapshotted
+    onto the memo.
+    """
     valid_ids = {e["id"] for e in evidence_items}
     result = _call_llm(product, company_row, evidence_items)
 
@@ -182,16 +188,18 @@ def build_memo(product: dict, company_row, evidence_items: list[dict]) -> dict:
     signal_confidence = assign_confidence(cited_evidence)
 
     conn = get_connection()
-    conn.execute(
+    cursor = conn.execute(
         """
         INSERT INTO memos (
-            company_id, icp_fit_score, icp_fit_label, signal_confidence,
+            profile_id, company_id, run_id, icp_fit_score, icp_fit_label, signal_confidence,
             why_relevant_text, potential_use_case_text, evidence_ids_json,
             citation_issues, review_status, generated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
+            profile_id,
             company_row["id"],
+            run_id,
             company_row["icp_fit_score"],
             company_row["icp_fit_label"],
             signal_confidence,
@@ -204,6 +212,6 @@ def build_memo(product: dict, company_row, evidence_items: list[dict]) -> dict:
         ),
     )
     conn.commit()
-    memo_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    memo_id = cursor.lastrowid
     conn.close()
     return {"id": memo_id, "issues": all_issues, "signal_confidence": signal_confidence, **result}

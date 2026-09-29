@@ -1,8 +1,8 @@
-"""Export memos to CSV for human review. No dashboard in V1 -- building a
-review UI before the memos are proven useful would be infrastructure ahead
-of validated value.
+"""Export one profile's memos to CSV for human review (the Phase 2 review
+UI will read the same tables directly).
 """
 import csv
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,12 +11,17 @@ from .db import get_connection
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
 
 
-def export_memos_to_csv() -> str:
+def _filename_slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "profile"
+
+
+def export_memos_to_csv(profile_id: int, profile_name: str) -> str:
     conn = get_connection()
     rows = conn.execute(
         """
         SELECT m.*, c.name AS company_name, c.domain, c.city, c.state, c.country
         FROM memos m JOIN companies c ON m.company_id = c.id
+        WHERE m.profile_id = ?
         ORDER BY
             CASE m.icp_fit_label WHEN 'High' THEN 0 WHEN 'Medium' THEN 1 ELSE 2 END,
             CASE m.signal_confidence
@@ -24,13 +29,14 @@ def export_memos_to_csv() -> str:
                 WHEN '\U0001F7E1 Plausible fit' THEN 1
                 ELSE 2
             END
-        """
+        """,
+        (profile_id,),
     ).fetchall()
     conn.close()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    out_path = OUTPUT_DIR / f"memos_{ts}.csv"
+    out_path = OUTPUT_DIR / f"memos_{_filename_slug(profile_name)}_{ts}.csv"
 
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)

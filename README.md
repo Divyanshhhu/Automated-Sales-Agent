@@ -1,4 +1,4 @@
-# AI Sales Agent — Prospect Research & Qualification (Phase 1)
+# AI Sales Agent — Prospect Research & Qualification
 
 An AI-assisted prospect research tool that takes a product profile and an
 ICP definition, discovers real candidate companies, researches each one
@@ -7,7 +7,7 @@ not a raw contact list. Every claim in a memo is either cited to a specific
 retrieved source or explicitly tagged as inference, so a salesperson can
 trust the reasoning instead of guessing which parts are made up.
 
-This is Phase 1 of a larger planned system (see **Roadmap** below) that will
+Phase 1 is complete; Phase 2 is in progress (see **Roadmap** below). It is part of a larger planned system that will
 eventually connect to an existing AI WhatsApp sales/RM agent for real
 estate leads, carrying one unified conversation context from first research
 through outreach, qualification, and demo booking.
@@ -22,10 +22,17 @@ retrieval (a rerun after a partial failure only re-queries the missing
 signal categories and never duplicates evidence), and up-front validation
 of `product_profile.json` that lists every problem at once.
 
+**Phase 2, Milestone 1 (done):** multiple named profiles stored in the
+database, with ICP scores (including a per-criterion breakdown), evidence and
+memos kept per profile so profiles never overwrite each other's results.
+Every pipeline run is recorded with a snapshot of the config it used. The
+database schema upgrades itself through versioned migrations. Next: the
+review UI (Milestones 2-4).
+
 ## How it works
 
 ```
-product_profile.json (product + ICP, human-edited)
+profile (product + ICP, stored in the database; JSON import/export)
         |
         v
 [1] Discovery -- one Exa company search per geography finds candidate
@@ -83,19 +90,34 @@ Fill in `.env` with your own keys:
 
 ## Running it
 
+Settings live in named **profiles** (product + ICP + signal queries). The
+JSON file format is how profiles are imported and exported:
+
 ```
-.\.venv\Scripts\python.exe run.py config\product_profile.json 25
+# first time: create a profile from the JSON file
+.\.venv\Scripts\python.exe run.py import-profile config\product_profile.json --name Default
+
+# run the pipeline for a profile
+.\.venv\Scripts\python.exe run.py run --profile Default --limit 25
+
+# other commands
+.\.venv\Scripts\python.exe run.py profiles                                   # list profiles
+.\.venv\Scripts\python.exe run.py import-profile my.json --name Default --replace  # update one
+.\.venv\Scripts\python.exe run.py export-profile Default my.json             # save one to a file
 ```
 
-The second argument caps how many companies discovery attempts to find —
-raise it once you're comfortable with the API cost (see below). Output
-lands in `output\memos_<timestamp>.csv`. Delete `data\pipeline.sqlite`
-between runs for a clean slate; otherwise a rerun skips any company that
-already has a memo.
+`--limit` caps how many companies discovery attempts to find — raise it
+once you're comfortable with the API cost (see below). Output lands in
+`output\memos_<profile>_<timestamp>.csv`. A rerun skips any company that
+already has a memo for that profile, and reuses evidence already fetched.
 
-Edit `config\product_profile.json` directly to test a different product,
-ICP, or geography — no code changes needed. The config is validated before
-any API call; each `signal_taxonomy` template must contain `{company}`.
+To try a different product, ICP, or geography, create another profile — its
+scores and memos are kept separately. Configs are validated before anything
+is saved or run; each `signal_taxonomy` template must contain `{company}`.
+
+The database (`data\pipeline.sqlite`) upgrades its own schema on first use
+after an update. A database from before profiles existed is adopted into a
+profile named "Default", created from `config\product_profile.json`.
 
 ## Development
 
@@ -130,10 +152,12 @@ the country when "India" is one of the configured geographies.
 ## Project layout
 
 ```
-config/product_profile.json   Product + ICP definition (human-edited)
+config/product_profile.json   Starter profile (JSON import/export format)
 src/
-  config.py           Loads + validates product_profile.json
-  db.py               SQLite schema: companies, evidence_items, memos
+  config.py           Loads + validates profile configs (JSON format)
+  db.py               SQLite connection + versioned schema migrations
+  profiles.py         Named profiles stored in the database
+  runs.py             Pipeline run records (status, stats, config snapshot)
   discovery.py         Exa company search + firmographics, with noise filters
   exa_client.py        Shared Exa search client
   tavily_client.py      Shared Tavily search client
@@ -142,9 +166,9 @@ src/
   memo_generator.py     LLM memo generation + citation validator (OpenAI)
   confidence.py        Rule-based Signal Confidence assignment
   export.py            CSV export
-  pipeline.py          Orchestrates the stages above
+  pipeline.py          Orchestrates one run for one profile
   retry.py             Shared retry-with-backoff for all external calls
-run.py                 CLI entrypoint
+run.py                 CLI: run, profiles, import-profile, export-profile
 tests/                 Offline pytest suite (APIs faked, temp DB)
 pyproject.toml         pytest / ruff / mypy configuration
 ```
@@ -153,8 +177,11 @@ pyproject.toml         pytest / ruff / mypy configuration
 
 - **Phase 1 (this)**: product + ICP -> discovered, scored, evidence-backed,
   confidence-tagged research memos -> human review via CSV.
-- **Phase 2**: real review UI backed by a database instead of CSV; grounded
-  outreach-draft generation from approved memos (human still sends).
+- **Phase 2** (in progress): profiles editable in a local web UI (FastAPI +
+  htmx), review UI backed by the database instead of CSV, grounded email
+  outreach drafts from approved memos with one configurable call-to-action
+  link (human still sends). Milestone 1 (profiles in the database, per-profile
+  results, run tracking) is done.
 - **Phase 3**: decision-maker/contact enrichment; reply classification;
   unified-context integration with the existing WhatsApp/voice sales agent.
 - **Phase 4**: automated sending with guardrails, broader signal sources,

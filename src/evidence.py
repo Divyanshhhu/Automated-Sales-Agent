@@ -50,8 +50,14 @@ def _is_genuine_pain_point(text: str) -> bool:
     return False
 
 
-def retrieve_evidence_for_company(company_id: str, company_name: str, signal_taxonomy: dict) -> int:
+def retrieve_evidence_for_company(
+    profile_id: int, company_id: str, company_name: str, signal_taxonomy: dict
+) -> int:
     """Run one bounded search per signal category for this company.
+
+    Evidence is stored per profile, because each profile has its own signal
+    queries -- evidence fetched for one profile's query never stands in for
+    another's.
 
     Idempotent: categories that already have stored evidence (from an earlier,
     partially failed run) are skipped rather than re-queried, and the unique
@@ -64,7 +70,8 @@ def retrieve_evidence_for_company(company_id: str, company_name: str, signal_tax
     already_covered = {
         row["category"]
         for row in conn.execute(
-            "SELECT DISTINCT category FROM evidence_items WHERE company_id=?", (company_id,)
+            "SELECT DISTINCT category FROM evidence_items WHERE profile_id=? AND company_id=?",
+            (profile_id, company_id),
         )
     }
     stored = 0
@@ -85,10 +92,11 @@ def retrieve_evidence_for_company(company_id: str, company_name: str, signal_tax
             cursor = conn.execute(
                 """
                 INSERT OR IGNORE INTO evidence_items
-                    (company_id, category, fact_text, source_url, source_date, retrieved_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                    (profile_id, company_id, category, fact_text, source_url, source_date, retrieved_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    profile_id,
                     company_id,
                     category,
                     content[:800],
@@ -103,10 +111,11 @@ def retrieve_evidence_for_company(company_id: str, company_name: str, signal_tax
     return stored
 
 
-def get_evidence_for_company(company_id: str) -> list[dict]:
+def get_evidence_for_company(profile_id: int, company_id: str) -> list[dict]:
     conn = get_connection()
     rows = conn.execute(
-        "SELECT * FROM evidence_items WHERE company_id=? ORDER BY id", (company_id,)
+        "SELECT * FROM evidence_items WHERE profile_id=? AND company_id=? ORDER BY id",
+        (profile_id, company_id),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
