@@ -108,6 +108,9 @@ def test_rerun_skips_companies_that_already_have_memos(temp_db: Path, fake_apis:
     tavily_calls, llm_calls = fake_apis["tavily"], len(fake_apis["llm"])
 
     second = get_run(run_pipeline(profile, discover_limit=5))
+    assert second.stats["discovered"] == 0  # both companies were seen by the first run
+    assert second.stats["already_known"] == 2
+    assert second.stats["qualified"] == 1  # still counted: it matches, it just has a memo already
     assert second.stats["qualifying"] == 0
     assert fake_apis["tavily"] == tavily_calls
     assert len(fake_apis["llm"]) == llm_calls

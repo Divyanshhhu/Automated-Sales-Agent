@@ -119,20 +119,44 @@ def test_filters_blocklisted_junk_irrelevant_and_entityless_results(
         ]
 
     monkeypatch.setattr(discovery, "exa_search", fake_exa)
-    companies = discover_companies(ICP)
-    assert [c["id"] for c in companies] == ["good-realty.in"]
+    found = discover_companies(ICP)
+    assert [c["id"] for c in found.companies] == ["good-realty.in"]
+    assert found.already_known == 0
 
 
 def test_limit_bounds_the_search(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[str] = []
+    calls: list[tuple[str, object]] = []
 
-    def fake_exa(query: str, **_: object) -> list[dict]:
-        calls.append(query)
+    def fake_exa(query: str, **kwargs: object) -> list[dict]:
+        calls.append((query, kwargs.get("num_results")))
         return [_result(f"https://dev{i}-{len(calls)}.in") for i in range(8)]
 
     monkeypatch.setattr(discovery, "exa_search", fake_exa)
-    assert len(discover_companies(ICP, limit=3)) == 3
+    assert len(discover_companies(ICP, limit=3).companies) == 3
     assert len(calls) == 1  # stops before searching the next geography
+    assert calls[0][1] == discovery.RESULTS_PER_SEARCH
+
+
+def test_known_companies_are_skipped_and_the_next_geography_searched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_exa(query: str, **_: object) -> list[dict]:
+        if "Mumbai" in query:
+            return [_result("https://seen-1.in"), _result("https://seen-2.in"), _result("https://fresh-mumbai.in")]
+        return [_result("https://fresh-pune.in"), _result("https://fresh-pune-2.in")]
+
+    monkeypatch.setattr(discovery, "exa_search", fake_exa)
+    found = discover_companies(ICP, limit=2, known_ids=frozenset({"seen-1.in", "seen-2.in"}))
+    # the limit counts new companies only, so Pune is searched to fill it
+    assert [c["id"] for c in found.companies] == ["fresh-mumbai.in", "fresh-pune.in"]
+    assert found.already_known == 2
+
+
+def test_everything_known_finds_nothing_new(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(discovery, "exa_search", lambda query, **_: [_result("https://seen.in")])
+    found = discover_companies(ICP, limit=5, known_ids=frozenset({"seen.in"}))
+    assert found.companies == []
+    assert found.already_known == 1  # same company in both geographies' results counts once
 
 
 def test_one_failed_geography_does_not_abort_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -142,7 +166,7 @@ def test_one_failed_geography_does_not_abort_discovery(monkeypatch: pytest.Monke
         return [_result("https://pune-realty.in", title="Real estate developer in Pune")]
 
     monkeypatch.setattr(discovery, "exa_search", fake_exa)
-    assert [c["id"] for c in discover_companies(ICP)] == ["pune-realty.in"]
+    assert [c["id"] for c in discover_companies(ICP).companies] == ["pune-realty.in"]
 
 
 def test_store_companies_upserts(temp_db: Path) -> None:

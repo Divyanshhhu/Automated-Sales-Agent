@@ -1,10 +1,18 @@
 import copy
+import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from src import db
 from src.profiles import Profile, create_profile
+from src.web import app as app_module
+from src.web import runner
+from src.web.app import create_app
+
+BASE_URL = "http://127.0.0.1"
 
 VALID_CONFIG: dict = {
     "product": {
@@ -82,3 +90,59 @@ def company_row(profile: Profile) -> dict:
     )
     conn.close()
     return row
+
+
+def insert_evidence(profile_id: int, company_id: str, *, category: str = "expansion_launch",
+                    fact: str = "Launched a new tower", url: str = "https://news.example/1") -> int:
+    conn = db.get_connection()
+    cursor = conn.execute(
+        """
+        INSERT INTO evidence_items (profile_id, company_id, category, fact_text, source_url, retrieved_at)
+        VALUES (?, ?, ?, ?, ?, '2026-01-01')
+        """,
+        (profile_id, company_id, category, fact, url),
+    )
+    conn.commit()
+    conn.close()
+    assert cursor.lastrowid is not None
+    return cursor.lastrowid
+
+
+def insert_memo(profile_id: int, company_id: str, *, why: str = "Launch news [INFERENCE].",
+                use_case: str = "Fit [INFERENCE].", issues: list[str] | None = None,
+                status: str = "pending", score: float = 100.0, confidence: str = "\U0001F7E1 Plausible fit",
+                evidence_ids: list[int] | None = None) -> int:
+    conn = db.get_connection()
+    cursor = conn.execute(
+        """
+        INSERT INTO memos (profile_id, company_id, icp_fit_score, icp_fit_label, signal_confidence,
+                           why_relevant_text, potential_use_case_text, evidence_ids_json,
+                           citation_issues, review_status, generated_at)
+        VALUES (?, ?, ?, 'High', ?, ?, ?, ?, ?, ?, '2026-01-01')
+        """,
+        (
+            profile_id, company_id, score, confidence, why, use_case,
+            json.dumps(evidence_ids) if evidence_ids is not None else None,
+            json.dumps(issues) if issues else None, status,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    assert cursor.lastrowid is not None
+    return cursor.lastrowid
+
+
+@pytest.fixture
+def starter_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The web UI's "new profile" starter file, pointed at VALID_CONFIG."""
+    path = tmp_path / "starter.json"
+    path.write_text(json.dumps(VALID_CONFIG), encoding="utf-8")
+    monkeypatch.setattr(app_module, "DEFAULT_PROFILE_PATH", path)
+    return path
+
+
+@pytest.fixture
+def client(temp_db: Path, starter_path: Path) -> Iterator[TestClient]:
+    with TestClient(create_app(), base_url=BASE_URL) as test_client:
+        yield test_client
+    runner.wait_for_active_run(timeout=5)

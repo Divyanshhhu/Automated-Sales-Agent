@@ -30,8 +30,14 @@ database schema upgrades itself through versioned migrations.
 
 **Phase 2, Milestone 2 (done):** a local web UI for creating, editing,
 duplicating, importing and exporting profiles, and for starting runs and
-watching their progress live. Next: memo review (Milestone 3) and outreach
-drafts (Milestone 4).
+watching their progress live.
+
+**Phase 2, Milestone 3 (done):** memo review in the UI, replacing the CSV as
+the main way to review. Filter and sort a profile's memos; read each one with
+clickable citations to its evidence, the ICP score breakdown and any
+citation problems; approve or reject with notes (moving on to the next memo
+automatically); regenerate a memo from the same evidence; download the CSV.
+Next: outreach drafts from approved memos (Milestone 4).
 
 ## How it works
 
@@ -125,10 +131,17 @@ JSON file format is how profiles are imported and exported:
 .\.venv\Scripts\python.exe run.py export-profile Default my.json             # save one to a file
 ```
 
-`--limit` caps how many companies discovery attempts to find — raise it
-once you're comfortable with the API cost (see below). Output lands in
-`output\memos_<profile>_<timestamp>.csv`. A rerun skips any company that
-already has a memo for that profile, and reuses evidence already fetched.
+`--limit` (in the UI: "New companies to find") caps how many *new*
+companies a run looks for: companies the profile has already evaluated are
+skipped, and further locations are searched until the limit is reached or
+the locations run out. Raise it once you're comfortable with the API cost
+(see below). Output lands in `output\memos_<profile>_<timestamp>.csv`.
+A rerun also retries any qualifying company that still lacks a memo, and
+reuses evidence already fetched.
+
+Each location supplies at most ~25 candidates, so once a profile has seen
+them all, runs find nothing new — the run page says so. Add locations or
+change the industry keywords to widen the search.
 
 To try a different product, ICP, or geography, create another profile — its
 scores and memos are kept separately. Configs are validated before anything
@@ -155,8 +168,9 @@ nothing and never touch `data\pipeline.sqlite`.
 For a batch that finds ~15-20 qualifying companies out of ~30-35
 discovered candidates:
 
-- **Exa**: ~7 discovery searches (one per configured geography), ~$0.007
-  each — discovery and enrichment together cost about 5 cents.
+- **Exa**: one search per location until enough new companies are found
+  (at most one per configured location), ~$0.022 each for 25 results —
+  discovery and enrichment together cost at most about 15 cents.
 - **Tavily**: 5 searches per qualifying company (one per signal category).
 - **OpenAI**: 1 call per qualifying company, ~$0.01-0.04 each on
   `gpt-6-luna` depending on evidence volume.
@@ -177,10 +191,12 @@ src/
   db.py               SQLite connection + versioned schema migrations
   profiles.py         Named profiles stored in the database
   runs.py             Pipeline run records (status, stats, config snapshot)
+  review.py           Memo review: list/filter, decisions, regenerate
   web/                Local web UI (FastAPI + Jinja2 templates + htmx)
     app.py            Routes + local-only safety checks
     forms.py          Profile form <-> config conversion, per-field errors
     runner.py         Background run thread (one at a time)
+    rendering.py      Escaped memo HTML with citation links; safe URLs
   discovery.py         Exa company search + firmographics, with noise filters
   exa_client.py        Shared Exa search client
   tavily_client.py      Shared Tavily search client
@@ -188,7 +204,7 @@ src/
   evidence.py          Bounded per-category evidence retrieval (Tavily)
   memo_generator.py     LLM memo generation + citation validator (OpenAI)
   confidence.py        Rule-based Signal Confidence assignment
-  export.py            CSV export
+  export.py            CSV export (file after each run, or UI download)
   pipeline.py          Orchestrates one run for one profile
   retry.py             Shared retry-with-backoff for all external calls
 run.py                 CLI: serve, run, profiles, import-profile, export-profile
@@ -204,8 +220,8 @@ pyproject.toml         pytest / ruff / mypy configuration
   htmx), review UI backed by the database instead of CSV, grounded email
   outreach drafts from approved memos with one configurable call-to-action
   link (human still sends). Milestones 1 (profiles in the database,
-  per-profile results, run tracking) and 2 (web UI for profiles and runs)
-  are done.
+  per-profile results, run tracking), 2 (web UI for profiles and runs) and
+  3 (memo review UI) are done.
 - **Phase 3**: decision-maker/contact enrichment; reply classification;
   unified-context integration with the existing WhatsApp/voice sales agent.
 - **Phase 4**: automated sending with guardrails, broader signal sources,

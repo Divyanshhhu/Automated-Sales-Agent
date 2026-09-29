@@ -1,7 +1,6 @@
 import copy
 import json
 import threading
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -9,28 +8,10 @@ from fastapi.testclient import TestClient
 
 from src import runs
 from src.profiles import Profile, create_profile, get_profile, get_profile_by_name, list_profiles
-from src.web import app as app_module
 from src.web import runner
 from src.web.app import create_app
 from src.web.forms import config_to_form
-from tests.conftest import VALID_CONFIG
-
-BASE_URL = "http://127.0.0.1"
-
-
-@pytest.fixture
-def starter_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    path = tmp_path / "starter.json"
-    path.write_text(json.dumps(VALID_CONFIG), encoding="utf-8")
-    monkeypatch.setattr(app_module, "DEFAULT_PROFILE_PATH", path)
-    return path
-
-
-@pytest.fixture
-def client(temp_db: Path, starter_path: Path) -> Iterator[TestClient]:
-    with TestClient(create_app(), base_url=BASE_URL) as test_client:
-        yield test_client
-    runner.wait_for_active_run(timeout=5)
+from tests.conftest import BASE_URL, VALID_CONFIG
 
 
 def _form(config: dict, name: str) -> dict[str, str]:
@@ -188,6 +169,29 @@ def test_start_run_and_view_result(client: TestClient, monkeypatch: pytest.Monke
     assert "succeeded" in page.text
     assert "hx-trigger" not in page.text  # finished runs stop polling
     assert "succeeded" in client.get("/runs").text
+
+
+@pytest.mark.parametrize(
+    ("stats", "message"),
+    [
+        (
+            {"discovered": 0, "already_known": 5, "qualifying": 0, "memos_generated": 0},
+            "No new companies found",
+        ),
+        ({"discovered": 4, "already_known": 0, "qualifying": 0, "memos_generated": 0}, "but none scored 50"),
+        ({"discovered": 4, "already_known": 0, "qualifying": 2, "memos_generated": 2}, "2 new memos written"),
+        ({"discovered": 5, "qualifying": 0, "memos_generated": 0}, None),  # old run: no explanation
+    ],
+)
+def test_finished_run_explains_its_outcome(client: TestClient, stats: dict, message: str | None) -> None:
+    profile = create_profile("P", copy.deepcopy(VALID_CONFIG))
+    run_id = runs.create_run(profile, 5)
+    runs.complete_run(run_id, {"stage": "done", **stats})
+    page = " ".join(client.get(f"/runs/{run_id}").text.split())  # as displayed: whitespace collapsed
+    if message:
+        assert message in page
+    else:
+        assert "No new companies found" not in page and "but none scored" not in page
 
 
 def test_active_run_status_keeps_polling(client: TestClient) -> None:

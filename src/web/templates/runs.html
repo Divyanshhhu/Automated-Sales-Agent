@@ -19,12 +19,13 @@
       </select>
     </div>
     <div class="field">
-      <label for="limit">Max companies</label>
+      <label for="limit">New companies to find</label>
       <input id="limit" type="number" name="limit" min="1" max="{{ max_limit }}" value="{{ limit }}" required>
     </div>
     <button class="btn btn-primary" type="submit">Start run</button>
   </form>
-  <p class="help muted">A run spends API credits: about 5 Tavily searches and one OpenAI call per qualifying company.</p>
+  <p class="help muted">Companies this profile has already seen are skipped, so each run looks for new ones.
+    A run spends API credits: about 5 Tavily searches and one OpenAI call per new company that matches the profile.</p>
   {% else %}
     <p class="empty">Create a <a href="/profiles/new">profile</a> first.</p>
   {% endif %}
@@ -41,9 +42,9 @@
           <th>Profile</th>
           <th>Status</th>
           <th>Started (UTC)</th>
-          <th class="num">Found</th>
-          <th class="num">Qualified</th>
-          <th class="num">Memos</th>
+          <th class="num" title="New companies this run found">New found</th>
+          <th class="num" title="Companies matching the profile in total">Qualified</th>
+          <th class="num" title="Memos written by this run">Memos written</th>
         </tr>
       </thead>
       <tbody>
@@ -54,7 +55,7 @@
           <td><span class="badge badge-{{ r.status }}">{{ r.status }}</span></td>
           <td class="muted">{{ r.started_at[:16] | replace("T", " ") }}</td>
           <td class="num">{{ r.stats.get("discovered", "–") }}</td>
-          <td class="num">{{ r.stats.get("qualifying", "–") }}</td>
+          <td class="num">{{ r.stats.get("qualified", "–") }}</td>
           <td class="num">{{ r.stats.get("memos_generated", "–") }}</td>
         </tr>
         {% endfor %}

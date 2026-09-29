@@ -10,7 +10,7 @@ hard rather than merely discouraged.
 import json
 import os
 import re
-from datetime import datetime, timezone
+from dataclasses import dataclass
 
 from openai import (
     APIConnectionError,
@@ -21,7 +21,7 @@ from openai import (
 )
 
 from .confidence import assign_confidence
-from .db import get_connection
+from .db import get_connection, utc_now
 from .retry import call_with_retry
 
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-6-luna")
@@ -159,33 +159,59 @@ def validate_citations(text: str, valid_evidence_ids: set[int]) -> list[str]:
     return issues
 
 
-def _extract_cited_evidence_ids(text: str) -> set[int]:
+def extract_cited_evidence_ids(text: str) -> set[int]:
     return {int(num) for _, num in CITATION_TAG_RE.findall(text) if num}
 
 
-def build_memo(
-    product: dict, company_row, evidence_items: list[dict], *, profile_id: int, run_id: int | None
-) -> dict:
-    """company_row must carry the profile's icp_fit_score / icp_fit_label
-    (the pipeline joins them in from company_scores); they're snapshotted
-    onto the memo.
-    """
+@dataclass(frozen=True)
+class MemoContent:
+    """A generated, citation-checked memo -- not yet stored."""
+
+    why_relevant: str
+    potential_use_case: str
+    issues: list[str]
+    signal_confidence: str
+    evidence_ids: list[int]  # every evidence item the model was shown
+
+    @property
+    def review_status(self) -> str:
+        return "needs_review" if self.issues else "pending"
+
+
+def write_memo(product: dict, company_row, evidence_items: list[dict]) -> MemoContent:
+    """Calls the model, then checks every citation deterministically."""
     valid_ids = {e["id"] for e in evidence_items}
     result = _call_llm(product, company_row, evidence_items)
 
-    all_issues = []
+    texts = {field: result.get(field) or "" for field in ("why_relevant", "potential_use_case")}
+    all_issues: list[str] = []
     cited_ids: set[int] = set()
-    for field in ("why_relevant", "potential_use_case"):
-        text = result.get(field, "")
+    for text in texts.values():
         all_issues.extend(validate_citations(text, valid_ids))
-        cited_ids |= _extract_cited_evidence_ids(text)
+        cited_ids |= extract_cited_evidence_ids(text)
 
     # Confidence reflects what the model actually cited as meaningful, not
     # merely which category searches happened to return some result --
     # a Tavily query returns *something* for almost any input, so raw
     # category presence is not proof of a real signal.
     cited_evidence = [e for e in evidence_items if e["id"] in cited_ids]
-    signal_confidence = assign_confidence(cited_evidence)
+    return MemoContent(
+        why_relevant=texts["why_relevant"],
+        potential_use_case=texts["potential_use_case"],
+        issues=all_issues,
+        signal_confidence=assign_confidence(cited_evidence),
+        evidence_ids=sorted(valid_ids),
+    )
+
+
+def build_memo(
+    product: dict, company_row, evidence_items: list[dict], *, profile_id: int, run_id: int | None
+) -> dict:
+    """Writes a memo and stores it. company_row must carry the profile's
+    icp_fit_score / icp_fit_label (the pipeline joins them in from
+    company_scores); they're snapshotted onto the memo.
+    """
+    memo = write_memo(product, company_row, evidence_items)
 
     conn = get_connection()
     cursor = conn.execute(
@@ -202,16 +228,22 @@ def build_memo(
             run_id,
             company_row["icp_fit_score"],
             company_row["icp_fit_label"],
-            signal_confidence,
-            result.get("why_relevant"),
-            result.get("potential_use_case"),
-            json.dumps(sorted(valid_ids)),
-            json.dumps(all_issues) if all_issues else None,
-            "needs_review" if all_issues else "pending",
-            datetime.now(timezone.utc).isoformat(),
+            memo.signal_confidence,
+            memo.why_relevant,
+            memo.potential_use_case,
+            json.dumps(memo.evidence_ids),
+            json.dumps(memo.issues) if memo.issues else None,
+            memo.review_status,
+            utc_now(),
         ),
     )
     conn.commit()
     memo_id = cursor.lastrowid
     conn.close()
-    return {"id": memo_id, "issues": all_issues, "signal_confidence": signal_confidence, **result}
+    return {
+        "id": memo_id,
+        "issues": memo.issues,
+        "signal_confidence": memo.signal_confidence,
+        "why_relevant": memo.why_relevant,
+        "potential_use_case": memo.potential_use_case,
+    }

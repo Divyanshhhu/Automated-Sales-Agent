@@ -9,6 +9,7 @@ tightest budget in the whole pipeline. Still a fixed, bounded set of queries
 """
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TypedDict
 from urllib.parse import urlparse
@@ -19,6 +20,11 @@ from .db import get_connection
 from .exa_client import exa_search
 
 logger = logging.getLogger("sales_agent")
+
+# 25 results per search cost ~$0.022 vs ~$0.007 for 8 (live-checked
+# 2026-09-29) and triple the pool of companies each geography can supply --
+# with only one search per geography, that pool is what limits new finds.
+RESULTS_PER_SEARCH = 25
 
 # Real estate portals, aggregators, media, and generic platforms that show up
 # in "top real estate developer" searches but are not themselves ICP targets
@@ -162,8 +168,19 @@ def company_from_result(result: dict) -> Company | None:
     )
 
 
-def discover_companies(icp: dict, limit: int = 25) -> list[Company]:
+@dataclass(frozen=True)
+class Discovery:
+    companies: list[Company]  # new companies, up to the limit
+    already_known: int  # valid results skipped because the profile has seen them before
+
+
+def discover_companies(icp: dict, limit: int = 25, *, known_ids: frozenset[str] = frozenset()) -> Discovery:
     """Fixed, bounded set of searches -- one per geography -- not open-ended.
+
+    `limit` counts *new* companies: results in `known_ids` (companies this
+    profile has already evaluated) are skipped and the next geography is
+    searched instead. Otherwise the same query returns the same top results
+    and every rerun would rediscover the same handful of companies.
 
     Four filters run on every result: the known-junk domain blocklist
     (applied here, not sent to Exa -- see exa_client.py), results without a
@@ -174,16 +191,17 @@ def discover_companies(icp: dict, limit: int = 25) -> list[Company]:
     """
     companies: list[Company] = []
     seen: set[str] = set()
+    already_known = 0
     for geography in icp["geographies"]:
         if len(companies) >= limit:
             break
         keyword = icp["industry_keywords"][0]  # one keyword per geography keeps this bounded
         query = f"top {keyword} companies in {geography}"
         try:
-            results = exa_search(query, num_results=8, category="company")
+            results = exa_search(query, num_results=RESULTS_PER_SEARCH, category="company")
         except requests.exceptions.RequestException:
             continue  # one geography's search failing shouldn't abort the whole batch
-        found_before = len(companies)
+        found_before, known_before = len(companies), already_known
         for r in results:
             domain = _domain_from_url(r.get("url", ""))
             if domain and _is_blocked(domain):
@@ -194,15 +212,18 @@ def discover_companies(icp: dict, limit: int = 25) -> list[Company]:
             if company is None or company["id"] in seen:
                 continue
             seen.add(company["id"])
+            if company["id"] in known_ids:
+                already_known += 1
+                continue
             companies.append(company)
             if len(companies) >= limit:
                 break
         logger.info(
-            "Discovery %r: %d results, %d with company data, %d new companies kept",
+            "Discovery %r: %d results, %d with company data, %d already known, %d new companies kept",
             geography, len(results), sum(1 for r in results if r.get("entity")),
-            len(companies) - found_before,
+            already_known - known_before, len(companies) - found_before,
         )
-    return companies
+    return Discovery(companies=companies, already_known=already_known)
 
 
 def store_companies(companies: list[Company]) -> list[str]:

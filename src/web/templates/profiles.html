@@ -36,6 +36,7 @@
           <td>
             <div class="actions">
               <a class="btn btn-small btn-primary" href="/runs?profile_id={{ p.id }}">Run</a>
+              <a class="btn btn-small" href="/review?profile_id={{ p.id }}">Review</a>
               <a class="btn btn-small" href="/profiles/{{ p.id }}/edit">Edit</a>
               <form method="post" action="/profiles/{{ p.id }}/duplicate">
                 <button class="btn btn-small" type="submit">Duplicate</button>

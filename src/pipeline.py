@@ -19,6 +19,27 @@ from .runs import complete_run, create_run, fail_run, mark_running, update_stats
 logger = logging.getLogger("sales_agent")
 
 
+def _known_company_ids(profile_id: int) -> frozenset[str]:
+    """Companies this profile has already evaluated (scored)."""
+    conn = get_connection()
+    try:
+        rows = conn.execute("SELECT company_id FROM company_scores WHERE profile_id=?", (profile_id,))
+        return frozenset(r["company_id"] for r in rows)
+    finally:
+        conn.close()
+
+
+def _qualified_total(profile_id: int, threshold: float) -> int:
+    """All companies clearing the threshold for this profile, memo or not."""
+    conn = get_connection()
+    try:
+        return conn.execute(
+            "SELECT COUNT(*) FROM company_scores WHERE profile_id=? AND score >= ?", (profile_id, threshold)
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+
 def _qualifying_companies(profile_id: int, threshold: float) -> list:
     """Companies that clear this profile's threshold and don't have a memo
     for this profile yet -- so a rerun picks up where a failed one stopped.
@@ -64,19 +85,24 @@ def run_pipeline(profile: Profile, discover_limit: int = 25, *, run_id: int | No
 
     try:
         checkpoint("discovering")
-        print(f"[1/5] Discovering companies matching ICP (up to {discover_limit})...")
-        companies = discover_companies(icp, limit=discover_limit)
-        company_ids = store_companies(companies)
+        print(f"[1/5] Discovering up to {discover_limit} new companies matching the ICP...")
+        discovery = discover_companies(icp, limit=discover_limit, known_ids=_known_company_ids(profile.id))
+        company_ids = store_companies(discovery.companies)
         stats["discovered"] = len(company_ids)
-        print(f"      Stored {len(company_ids)} companies.")
+        stats["already_known"] = discovery.already_known
+        print(
+            f"      Found {len(company_ids)} new companies "
+            f"({discovery.already_known} seen before, skipped)."
+        )
 
         checkpoint("scoring")
         print("[2/5] Scoring ICP fit (deterministic)...")
         stats["scored"] = score_companies_for_profile(profile.id, icp, company_ids)
         threshold = icp.get("min_icp_fit_score", 50)
         qualifying = _qualifying_companies(profile.id, threshold)
+        stats["qualified"] = _qualified_total(profile.id, threshold)
         stats["qualifying"] = len(qualifying)
-        print(f"      Scored {stats['scored']} companies.")
+        print(f"      Scored {stats['scored']} companies; {stats['qualified']} match the profile in total.")
         print(
             f"      {len(qualifying)} companies clear the ICP fit threshold ({threshold}) "
             "and still need a memo."

@@ -6,9 +6,9 @@ guards matter: a Host check (blocks DNS-rebinding) and a same-origin check on
 every state-changing request (blocks other websites from submitting forms to
 localhost -- e.g. silently starting a run that spends API credits).
 """
+import io
 import json
 import logging
-import re
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -23,6 +23,8 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from ..config import ConfigError, load_config, validate_config
 from ..db import DEFAULT_PROFILE_PATH
+from ..export import filename_slug, write_memos_csv
+from ..icp_scorer import WEIGHTS
 from ..profiles import (
     InvalidProfileNameError,
     ProfileExistsError,
@@ -32,9 +34,23 @@ from ..profiles import (
     list_profiles,
     update_profile,
 )
+from ..review import (
+    CONFIDENCE_FILTERS,
+    DECISIONS,
+    SORTS,
+    STATUS_FILTERS,
+    MemoNotFoundError,
+    get_memo,
+    list_memos,
+    next_memo_to_review,
+    regenerate_memo,
+    set_review,
+    status_counts,
+)
 from ..runs import RunNotFoundError, fail_orphaned_runs, get_run, list_runs
 from . import runner
 from .forms import FORM_ERROR, config_to_form, form_to_config, group_errors
+from .rendering import render_cited_text, safe_http_url
 
 logger = logging.getLogger("sales_agent")
 
@@ -45,10 +61,8 @@ MAX_DISCOVER_LIMIT = 100
 MAX_IMPORT_BYTES = 1_000_000
 
 templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
-
-
-def _slug(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "profile"
+templates.env.filters["cited"] = render_cited_text
+templates.env.filters["safe_url"] = safe_http_url
 
 
 def _starter_config() -> dict:
@@ -197,7 +211,7 @@ def create_app(*, allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS) -> Fas
         profile = get_profile(profile_id)
         return JSONResponse(
             profile.config,
-            headers={"Content-Disposition": f'attachment; filename="{_slug(profile.name)}.json"'},
+            headers={"Content-Disposition": f'attachment; filename="{filename_slug(profile.name)}.json"'},
         )
 
     @app.post("/profiles/import")
@@ -278,6 +292,105 @@ def create_app(*, allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS) -> Fas
     def run_status(request: Request, run_id: int) -> HTMLResponse:
         return templates.TemplateResponse(request, "_run_status.html", {"run": get_run(run_id)})
 
+    # ---------- review ----------
+
+    @app.get("/review", response_class=HTMLResponse)
+    def review_page(
+        request: Request,
+        profile_id: int | None = None,
+        status: str = "to_review",
+        confidence: str = "",
+        sort: str = "score",
+    ) -> HTMLResponse:
+        profiles = list_profiles()
+        profile = get_profile(profile_id) if profile_id is not None else (profiles[0] if profiles else None)
+        status = status if status in STATUS_FILTERS else "to_review"
+        confidence = confidence if confidence in CONFIDENCE_FILTERS else ""
+        sort = sort if sort in SORTS else "score"
+        return templates.TemplateResponse(
+            request,
+            "review.html",
+            {
+                "profiles": profiles,
+                "profile": profile,
+                "memos": list_memos(profile.id, status=status, confidence=confidence, sort=sort)
+                if profile
+                else [],
+                "counts": status_counts(profile.id) if profile else {},
+                "filters": {"status": status, "confidence": confidence, "sort": sort},
+                "confidence_labels": CONFIDENCE_FILTERS,
+            },
+        )
+
+    def render_memo(
+        request: Request, memo_id: int, *, error: str | None = None, status_code: int = 200
+    ) -> HTMLResponse:
+        memo = get_memo(memo_id)
+        notice = None
+        done_id = request.query_params.get("done")
+        if done_id and done_id.isdigit():
+            try:
+                done = get_memo(int(done_id))
+                notice = f"Saved: {done.company['name']} marked {done.review_status.replace('_', ' ')}."
+            except MemoNotFoundError:
+                pass
+        elif request.query_params.get("regenerated"):
+            notice = "Memo regenerated from the stored evidence. Review it again below."
+        elif request.query_params.get("saved"):
+            notice = "Review saved."
+        return templates.TemplateResponse(
+            request,
+            "memo_detail.html",
+            {"memo": memo, "notice": notice, "error": error, "weights": WEIGHTS},
+            status_code=status_code,
+        )
+
+    @app.get("/memos/{memo_id:int}", response_class=HTMLResponse)
+    def memo_page(request: Request, memo_id: int) -> HTMLResponse:
+        return render_memo(request, memo_id)
+
+    @app.post("/memos/{memo_id:int}/review")
+    async def review_memo(request: Request, memo_id: int) -> Response:
+        form = await request.form()
+        decision, notes = str(form.get("decision", "")), str(form.get("notes", ""))
+        if decision not in DECISIONS:
+            return render_memo(request, memo_id, error="Unknown review decision", status_code=422)
+        set_review(memo_id, decision, notes)
+        memo = get_memo(memo_id)
+        if decision != "reset" and form.get("advance"):
+            next_id = next_memo_to_review(memo.profile_id, exclude_id=memo_id)
+            if next_id is not None:
+                return RedirectResponse(f"/memos/{next_id}?done={memo_id}", status_code=303)
+            return RedirectResponse(f"/review?profile_id={memo.profile_id}&status=all", status_code=303)
+        return RedirectResponse(f"/memos/{memo_id}?saved=1", status_code=303)
+
+    @app.post("/memos/{memo_id:int}/regenerate")
+    def regenerate(request: Request, memo_id: int) -> Response:
+        get_memo(memo_id)  # 404 before spending an LLM call
+        try:
+            regenerate_memo(memo_id)
+        except Exception as exc:  # external LLM call: show the failure, keep the old memo
+            logger.exception("Regenerating memo %d failed", memo_id)
+            return render_memo(
+                request, memo_id, error=f"Regeneration failed, the previous memo is unchanged: {exc}",
+                status_code=502,
+            )
+        return RedirectResponse(f"/memos/{memo_id}?regenerated=1", status_code=303)
+
+    @app.get("/profiles/{profile_id:int}/memos.csv")
+    def download_memos_csv(profile_id: int) -> Response:
+        profile = get_profile(profile_id)
+        buffer = io.StringIO()
+        write_memos_csv(profile.id, buffer)
+        # BOM so Excel detects UTF-8 (the confidence labels contain emoji)
+        return Response(
+            ("\ufeff" + buffer.getvalue()).encode("utf-8"),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="memos_{filename_slug(profile.name)}.csv"'
+            },
+        )
+
     # ---------- errors ----------
 
     async def not_found(request: Request, exc: Exception) -> HTMLResponse:
@@ -285,5 +398,6 @@ def create_app(*, allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS) -> Fas
 
     app.add_exception_handler(ProfileNotFoundError, not_found)
     app.add_exception_handler(RunNotFoundError, not_found)
+    app.add_exception_handler(MemoNotFoundError, not_found)
 
     return app

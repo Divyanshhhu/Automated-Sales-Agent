@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Review{% endblock %}
+
+{% macro filter_link(label, key, value) -%}
+  {%- set params = dict(filters, profile_id=profile.id) -%}
+  {%- set _ = params.update({key: value}) -%}
+  <a class="chip {% if filters[key] == value %}chip-active{% endif %}"
+     href="/review?{{ params | urlencode }}">{{ label }}</a>
+{%- endmacro %}
+
+{% block content %}
+<div class="page-head">
+  <h1>Review memos</h1>
+  {% if profile %}
+    <a class="btn" href="/profiles/{{ profile.id }}/memos.csv">Download CSV</a>
+  {% endif %}
+</div>
+
+{% if not profile %}
+  <div class="card"><p class="empty">No profiles yet. <a href="/profiles/new">Create one</a> and run it first.</p></div>
+{% else %}
+<div class="card">
+  <form class="inline-form" method="get" action="/review">
+    <div class="field">
+      <label for="profile_id">Profile</label>
+      <select id="profile_id" name="profile_id" onchange="this.form.submit()">
+        {% for p in profiles %}
+          <option value="{{ p.id }}" {% if p.id == profile.id %}selected{% endif %}>{{ p.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="sort">Sort by</label>
+      <select id="sort" name="sort" onchange="this.form.submit()">
+        {% for key, label in [("score", "ICP score"), ("confidence", "Signal confidence"), ("company", "Company name"), ("newest", "Newest")] %}
+          <option value="{{ key }}" {% if filters.sort == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <input type="hidden" name="status" value="{{ filters.status }}">
+    <input type="hidden" name="confidence" value="{{ filters.confidence }}">
+    <noscript><button class="btn" type="submit">Apply</button></noscript>
+  </form>
+
+  <div class="chips" aria-label="Filter by status">
+    {{ filter_link("To review (" ~ counts.to_review ~ ")", "status", "to_review") }}
+    {{ filter_link("Approved (" ~ counts.approved ~ ")", "status", "approved") }}
+    {{ filter_link("Rejected (" ~ counts.rejected ~ ")", "status", "rejected") }}
+    {{ filter_link("All (" ~ counts.all ~ ")", "status", "all") }}
+  </div>
+  <div class="chips" aria-label="Filter by signal confidence">
+    {{ filter_link("Any signal", "confidence", "") }}
+    {% for key, label in confidence_labels.items() %}
+      {{ filter_link(label, "confidence", key) }}
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  {% if memos %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Company</th>
+          <th>Location</th>
+          <th class="num">ICP score</th>
+          <th>Signal</th>
+          <th>Status</th>
+          <th class="num">Citation issues</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in memos %}
+        <tr>
+          <td><a href="/memos/{{ m.id }}">{{ m.company_name }}</a>
+            {% if m.domain %}<div class="muted small">{{ m.domain }}</div>{% endif %}</td>
+          <td>{{ m.location }}</td>
+          <td class="num">{{ m.icp_fit_score | round | int if m.icp_fit_score is not none else "–" }}
+            <div class="muted small">{{ m.icp_fit_label or "" }}</div></td>
+          <td>{{ m.signal_confidence or "–" }}</td>
+          <td><span class="badge badge-{{ m.review_status }}">{{ m.review_status | replace("_", " ") }}</span></td>
+          <td class="num">{{ m.issue_count or "" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="empty">
+      {% if counts.all == 0 %}No memos for this profile yet — <a href="/runs?profile_id={{ profile.id }}">start a run</a>.
+      {% else %}No memos match these filters.{% endif %}
+    </p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -6,7 +6,7 @@
      {% if run.is_active %}hx-get="/runs/{{ run.id }}/status" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <p>
     <span class="badge badge-{{ run.status }}">{{ run.status }}</span>
-    <span class="muted">limit {{ run.discover_limit }} · started {{ run.started_at[:19] | replace("T", " ") }} UTC
+    <span class="muted">looking for up to {{ run.discover_limit }} new companies · started {{ run.started_at[:19] | replace("T", " ") }} UTC
     {% if run.finished_at %} · finished {{ run.finished_at[:19] | replace("T", " ") }} UTC{% endif %}</span>
   </p>
 
@@ -18,9 +18,10 @@
 
   {% set s = run.stats %}
   <dl class="stats">
-    <div><dt>Companies found</dt><dd>{{ s.get("discovered", "–") }}</dd></div>
-    <div><dt>Qualified</dt><dd>{{ s.get("qualifying", "–") }}</dd></div>
-    <div><dt>Researched</dt><dd>
+    <div><dt>New companies found</dt><dd>{{ s.get("discovered", "–") }}</dd></div>
+    <div><dt>Seen before (skipped)</dt><dd>{{ s.get("already_known", "–") }}</dd></div>
+    <div><dt>Match the profile (total)</dt><dd>{{ s.get("qualified", "–") }}</dd></div>
+    <div><dt>New matches researched</dt><dd>
       {%- if "qualifying" in s -%}
         {#- runs from before progress tracking have no evidence_done; if they got past evidence, all were done -#}
         {{ s.get("evidence_done", s.qualifying if "evidence_added" in s else 0) }} / {{ s.qualifying }}
@@ -32,6 +33,27 @@
 
   {% if run.error %}
     <div class="notice notice-error" role="alert" style="margin-top: 16px">{{ run.error }}</div>
+  {% endif %}
+
+  {#- runs from before new-company tracking lack "already_known"; their counts can't be explained this way -#}
+  {% if run.status == "succeeded" and "already_known" in s %}
+    {% set threshold = run.config.icp.get("min_icp_fit_score", 50) %}
+    <div class="notice {% if s.get('memos_generated') %}notice-ok{% else %}notice-info{% endif %}" style="margin-top: 16px">
+      {% if s.get("memos_generated") %}
+        {{ s.memos_generated }} new memo{{ "s" if s.memos_generated != 1 }} written.
+        <a href="/review?profile_id={{ run.profile_id }}">Review them →</a>
+      {% elif s.get("discovered") == 0 %}
+        No new companies found — every company these searches returned has been seen by this profile before.
+        To find more, add locations or change the industry keywords in the
+        <a href="/profiles/{{ run.profile_id }}/edit">profile</a>.
+      {% elif s.get("qualifying") == 0 %}
+        Found {{ s.discovered }} new compan{{ "ies" if s.discovered != 1 else "y" }}, but none scored
+        {{ threshold }} or more, so no memos were needed. You can widen the employee range or locations,
+        or lower the minimum score, in the <a href="/profiles/{{ run.profile_id }}/edit">profile</a>.
+      {% else %}
+        No new memos were written.
+      {% endif %}
+    </div>
   {% endif %}
   {% if s.get("csv_path") %}
     <p style="margin-top: 16px">CSV: <span class="path">{{ s.csv_path }}</span></p>
