@@ -1,0 +1,19 @@
+# Tool configuration only -- runtime dependencies live in requirements.txt,
+# dev tooling in requirements-dev.txt.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src", "run.py", "tests"]
+check_untyped_defs = true
+warn_unused_ignores = true

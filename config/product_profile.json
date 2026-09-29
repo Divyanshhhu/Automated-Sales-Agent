@@ -1,0 +1,29 @@
+{
+  "product": {
+    "name": "AI WhatsApp Sales/RM Agent",
+    "description": "An AI-powered WhatsApp relationship-manager agent for real estate leads. It responds to inbound property inquiries instantly, maintains conversation context, answers questions about listings/projects, qualifies buyer requirements, handles common objections, and books site visits or demos, escalating to a human agent when needed.",
+    "problem_solved": "Real estate developers and brokerages lose 70-80% of inbound leads because average response time is 4-6 hours and 68% of inquiries arrive after business hours, when no RM is available to respond.",
+    "pricing": "Not finalized",
+    "differentiators": [
+      "Instant 24/7 WhatsApp response, closing the after-hours response gap",
+      "Maintains one unified conversation context per lead across channels",
+      "Qualifies and books site visits without human involvement for routine inquiries"
+    ],
+    "competitors": ["Generic chatbot builders", "In-house CRM follow-up teams", "Manual RM/telecalling teams"]
+  },
+  "icp": {
+    "industries": ["Real estate development", "Real estate brokerage"],
+    "industry_keywords": ["real estate developer", "real estate broker", "property developer", "realty"],
+    "employee_range": [51, 2000],
+    "geographies": ["Mumbai", "Bangalore", "Pune", "Delhi", "Gurugram", "Hyderabad", "India"],
+    "roles": ["Head of Sales", "VP Sales", "Head of CRM", "Founder", "Director of Sales"],
+    "min_icp_fit_score": 50
+  },
+  "signal_taxonomy": {
+    "expansion_launch": "{company} new project launch expansion 2026",
+    "hiring_leadership": "{company} hiring sales head OR CRM head OR new leadership appointment",
+    "funding_financial": "{company} sales bookings OR revenue OR funding 2026",
+    "direct_pain_point": "{company} customer complaint OR review slow response OR delayed follow up",
+    "tech_adoption": "{company} CRM software OR WhatsApp business OR digital sales tools"
+  }
+}
