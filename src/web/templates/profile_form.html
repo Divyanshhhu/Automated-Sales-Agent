@@ -106,6 +106,8 @@
     {{ area_field('signal_taxonomy', 'Search queries',
        'One per line as "category_name: query". {company} is replaced with the company name. Only the direct_pain_point category can produce a 🟢 Strong signal.',
        'tall') }}
+    {{ area_field('signals.likely_need_phrases', 'Signs of a likely need',
+       'One per line. A memo that cites evidence containing one of these phrases is marked 🔵 Likely need — stronger than 🟡 Plausible fit, below 🟢 Strong signal (a direct complaint). Pick phrases that point at the problem your product solves, e.g. "telecaller" or "click-to-whatsapp". Saving re-labels existing memos.') }}
   </div>
 
   <div class="actions">

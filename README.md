@@ -70,7 +70,10 @@ profile (product + ICP, stored in the database; JSON import/export)
         v
 [3] Evidence retrieval -- Tavily runs one bounded search per signal
     category (expansion/launch, hiring, funding, direct pain-point,
-    tech adoption) for each company that clears the ICP threshold
+    tech adoption) for each company that clears the ICP threshold.
+    Pain-point searches go to consumer complaint/review sites, and a
+    result only counts if it names the company and complains about
+    responsiveness (no reply, no update, no follow-up...)
     (deterministic, no LLM)
         |
         v
@@ -81,11 +84,13 @@ profile (product + ICP, stored in the database; JSON import/export)
     after generation, not just the prompt
         |
         v
-[5] Signal Confidence -- rule-based (not LLM), derived from which
-    evidence categories the model actually cited: a direct pain-point
-    citation -> Strong, expansion/hiring/etc. -> Plausible, nothing
-    citable -> Weak/unclear. Weak-fit companies are surfaced with the
-    tag, never silently dropped.
+[5] Signal Confidence -- rule-based (not LLM), derived from the
+    evidence the memo actually cited: a direct pain-point complaint ->
+    Strong; one of the profile's "likely need" phrases (e.g. hiring
+    telecallers, click-to-WhatsApp ads) -> Likely need; other signals
+    (launches, hiring, funding, tech) -> Plausible; nothing citable ->
+    Weak/unclear. Each memo shows why it got its level. Weak-fit
+    companies are surfaced with the tag, never silently dropped.
         |
         v
 [6] CSV export, sorted by ICP Fit then Signal Confidence, for human

@@ -9,6 +9,7 @@ from src.review import (
     get_memo,
     list_memos,
     next_memo_to_review,
+    refresh_signals,
     regenerate_memo,
     set_review,
     status_counts,
@@ -105,6 +106,33 @@ def test_next_memo_to_review(profile: Profile, memos: dict[str, int]) -> None:
     set_review(memos["alpha"], "approved")
     set_review(memos["beta"], "rejected")
     assert next_memo_to_review(profile.id) is None
+
+
+def test_memo_explains_its_signal_and_refresh_relabels(profile: Profile) -> None:
+    insert_company("a.in", "Alpha")
+    fact_id = insert_evidence(profile.id, "a.in", category="tech_adoption",
+                              fact="Runs click-to-WhatsApp ads for every launch")
+    memo_id = insert_memo(profile.id, "a.in", why=f"WhatsApp ads [E{fact_id}].", evidence_ids=[fact_id])
+
+    memo = get_memo(memo_id)
+    assert memo.signal.level == "plausible"  # the profile has no likely-need phrases yet
+    assert "general signals only" in memo.signal.reason
+
+    signals = {"likely_need_phrases": ["click-to-whatsapp"]}
+    update_profile(profile.id, config={**profile.config, "signals": signals})
+    assert refresh_signals(profile.id) == 1
+    memo = get_memo(memo_id)
+    assert memo.signal_confidence == LABELS["likely"]
+    assert memo.signal.level == "likely"
+    assert refresh_signals(profile.id) == 0  # already consistent
+
+
+def test_likely_need_sorts_between_strong_and_plausible(profile: Profile) -> None:
+    for domain, confidence in (("p.in", "plausible"), ("l.in", "likely"), ("s.in", "strong")):
+        insert_company(domain, domain)
+        insert_memo(profile.id, domain, confidence=LABELS[confidence])
+    ordered = [m.signal_confidence for m in list_memos(profile.id, status="all", sort="confidence")]
+    assert ordered == [LABELS["strong"], LABELS["likely"], LABELS["plausible"]]
 
 
 def test_missing_memo(profile: Profile) -> None:

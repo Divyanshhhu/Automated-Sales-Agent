@@ -44,8 +44,9 @@ def write_memos_csv(profile_id: int, stream: TextIO) -> int:
                 CASE m.icp_fit_label WHEN 'High' THEN 0 WHEN 'Medium' THEN 1 ELSE 2 END,
                 CASE m.signal_confidence
                     WHEN '\U0001F7E2 Strong signal' THEN 0
-                    WHEN '\U0001F7E1 Plausible fit' THEN 1
-                    ELSE 2
+                    WHEN '\U0001F535 Likely need' THEN 1
+                    WHEN '\U0001F7E1 Plausible fit' THEN 2
+                    ELSE 3
                 END
             """,
             (profile_id,),

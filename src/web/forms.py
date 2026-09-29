@@ -24,11 +24,14 @@ LIST_FIELDS = (
 TEXT_FIELDS = ("product.name", "product.description", "product.problem_solved", "product.pricing")
 # optional section: only written to the config if something is filled in
 OUTREACH_FIELDS = ("outreach.sender_name", "outreach.signature", "outreach.cta_label", "outreach.cta_url")
+# optional list field, same rule: phrases marking a cited fact as a likely need
+PHRASES_FIELD = "signals.likely_need_phrases"
 # where each form field's errors are shown; employee min/max share one
 ERROR_FIELDS = (
     *TEXT_FIELDS,
     *OUTREACH_FIELDS,
     *LIST_FIELDS,
+    PHRASES_FIELD,
     "icp.employee_range",
     "icp.min_icp_fit_score",
     "signal_taxonomy",
@@ -59,7 +62,7 @@ def config_to_form(config: dict) -> dict[str, str]:
     for path in (*TEXT_FIELDS, *OUTREACH_FIELDS):
         value = _get(config, path)
         values[path] = value if isinstance(value, str) else ""
-    for path in LIST_FIELDS:
+    for path in (*LIST_FIELDS, PHRASES_FIELD):
         value = _get(config, path)
         values[path] = "\n".join(str(v) for v in value) if isinstance(value, list) else ""
 
@@ -103,6 +106,9 @@ def form_to_config(form: Mapping[str, str], base: dict) -> tuple[dict, dict[str,
         config["outreach"] = {**(base.get("outreach") or {}), **outreach}
     for path in LIST_FIELDS:
         _set(config, path, _lines(form.get(path, "")))
+    phrases = _lines(form.get(PHRASES_FIELD, ""))
+    if phrases or "signals" in base:
+        _set(config, PHRASES_FIELD, phrases)
 
     emp_min, emp_max = form.get("icp.employee_min", "").strip(), form.get("icp.employee_max", "").strip()
     try:

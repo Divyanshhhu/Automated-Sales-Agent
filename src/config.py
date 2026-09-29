@@ -111,6 +111,22 @@ def _validate_outreach(outreach: Any, errors: list[str]) -> None:
             errors.append("outreach.cta_url must be a full link starting with https:// (or leave it empty)")
 
 
+def _validate_signals(signals: Any, errors: list[str]) -> None:
+    """Optional section tuning Signal Confidence (see confidence.py)."""
+    if not isinstance(signals, dict):
+        errors.append("signals must be an object")
+        return
+    phrases = signals.get("likely_need_phrases", [])
+    if not isinstance(phrases, list) or not all(isinstance(p, str) and p.strip() for p in phrases):
+        errors.append("signals.likely_need_phrases must be a list of non-empty strings")
+
+
+def likely_need_phrases(config: dict) -> list[str]:
+    """The profile's phrases that mark a cited fact as a strong sign of need."""
+    signals = config.get("signals")
+    return list(signals.get("likely_need_phrases", [])) if isinstance(signals, dict) else []
+
+
 def validate_config(config: Any) -> None:
     """Raises ConfigError listing every problem found, or returns None if valid."""
     if not isinstance(config, dict):
@@ -127,6 +143,8 @@ def validate_config(config: Any) -> None:
         _validate_signal_taxonomy(config["signal_taxonomy"], errors)
     if "outreach" in config:
         _validate_outreach(config["outreach"], errors)
+    if "signals" in config:
+        _validate_signals(config["signals"], errors)
     if errors:
         raise ConfigError("Invalid config:\n  - " + "\n  - ".join(errors), errors)
 

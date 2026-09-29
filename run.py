@@ -40,6 +40,7 @@ from src.profiles import (  # noqa: E402
     list_profiles,
     update_profile,
 )
+from src.review import refresh_signals  # noqa: E402
 
 
 def _positive_int(value: str) -> int:
@@ -81,7 +82,8 @@ def cmd_import_profile(args: argparse.Namespace) -> None:
             f"A profile named {args.name!r} already exists -- pass --replace to overwrite its config"
         )
     profile = update_profile(existing.id, config=config)
-    print(f"Updated profile {profile.name!r} (id {profile.id}).")
+    relabelled = refresh_signals(profile.id)
+    print(f"Updated profile {profile.name!r} (id {profile.id}); {relabelled} memo signal(s) re-labelled.")
 
 
 def cmd_export_profile(args: argparse.Namespace) -> None:

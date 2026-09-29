@@ -23,7 +23,16 @@
     "expansion_launch": "{company} new project launch expansion 2026",
     "hiring_leadership": "{company} hiring sales head OR CRM head OR new leadership appointment",
     "funding_financial": "{company} sales bookings OR revenue OR funding 2026",
-    "direct_pain_point": "{company} customer complaint OR review slow response OR delayed follow up",
+    "direct_pain_point": "{company} customer complaint no response OR not responding OR delayed follow up",
     "tech_adoption": "{company} CRM software OR WhatsApp business OR digital sales tools"
+  },
+  "signals": {
+    "likely_need_phrases": [
+      "telecaller", "tele-caller", "telecalling", "telesales", "tele sales",
+      "pre-sales", "presales", "inside sales", "sales coordinator",
+      "crm executive", "customer relationship executive", "lead management",
+      "click-to-whatsapp", "click to whatsapp", "whatsapp ads", "whatsapp leads",
+      "whatsapp enquiries", "whatsapp business api", "missed calls", "lead leakage"
+    ]
   }
 }

@@ -14,40 +14,65 @@ from .tavily_client import tavily_search
 
 RESULTS_PER_CATEGORY = 2
 
-# direct_pain_point is the one category that gates the "Strong signal" label
-# (see confidence.py), so an OR-heavy query returning a loosely-related page
-# must not be allowed to count as a genuine complaint/delay signal just
-# because it was fetched under that query slot. A bare substring match on a
-# word like "delay" is not enough -- "government approval-related delays" in
-# a results announcement matched on that basis alone during live testing and
-# was not actually about customer response time. Require a negative-quality
-# term to co-occur with a customer/response-context term.
-NEGATIVE_QUALITY_TERMS = (
-    "complaint", "complaints", "slow", "unresponsive", "negative review",
-    "poor experience", "no response", "ignored", "waiting", "dissatisf",
-    "frustrat", "unhappy", "delay", "delayed",
+# direct_pain_point is the one category that can make a signal "Strong" (see
+# confidence.py). Complaints about a company's responsiveness live on
+# consumer review/complaint sites, not the general web -- a general-web
+# query returned nothing usable for any company in live runs -- so this
+# category searches those sites. They're noisy (other companies, site
+# boilerplate), so more results are fetched and each must pass the checks
+# below. Same Tavily cost: one credit per search regardless of result count.
+PAIN_POINT_CATEGORY = "direct_pain_point"
+PAIN_POINT_SITES = ["mouthshut.com", "consumercomplaints.in", "voxya.com", "complaintboard.in", "reddit.com"]
+PAIN_POINT_RESULTS = 5
+
+# A pain point must be about *responsiveness* -- the problem the product
+# solves -- not any complaint. Live examples of what must NOT count:
+# "government approval-related delays" (unrelated delay), "customer
+# collections" (positive), and complaint-site boilerplate like "File a
+# complaint and get it resolved by ... customer care". So a clause needs a
+# negative term AND a communication term; bare "complaint"/"delay" isn't one.
+NEGATIVE_TERMS = (
+    "slow", "unresponsive", "no response", "not responding", "not respond", "no reply", "never replied",
+    "no update", "no one", "nobody", "ignored", "ignoring", "unreachable", "not reachable",
+    "no follow", "never called", "not called", "waiting", "delay", "delayed", "frustrat",
+    "dissatisf", "unhappy", "pathetic", "worst", "poor",
 )
-CUSTOMER_CONTEXT_TERMS = (
-    "customer", "customers", "buyer", "buyers", "client", "clients",
-    "lead", "leads", "inquiry", "inquiries", "enquiry", "enquiries",
-    "response", "follow-up", "follow up", "service", "support", "review",
+COMMUNICATION_TERMS = (
+    "response", "respond", "reply", "replied", "revert", "call back", "callback", "called", "calls",
+    "follow up", "follow-up", "followup", "update", "customer care", "customer service",
+    "helpline", "contact", "reach", "enquir", "inquir", "query", "queries", "email", "mail",
 )
 
 
 def _is_genuine_pain_point(text: str) -> bool:
-    # Whole-blob co-occurrence isn't enough: a live test found "customer
-    # collections" (financial, positive) and "government approval-related
-    # delays" (unrelated) both present in the same 800-char snippet, which
-    # satisfied a blob-level check without either phrase being about
-    # customer response time. Require both terms in the SAME clause.
-    clauses = re.split(r"[.!?•\n]", text)
-    for clause in clauses:
+    # Checked per clause, not per snippet: a live 800-char snippet held both
+    # "customer collections" and "government approval-related delays",
+    # which satisfied a whole-snippet check without either being about
+    # response time.
+    for clause in re.split(r"[.!?•\n]", text):
         lowered = clause.lower()
-        has_negative = any(kw in lowered for kw in NEGATIVE_QUALITY_TERMS)
-        has_customer_context = any(kw in lowered for kw in CUSTOMER_CONTEXT_TERMS)
-        if has_negative and has_customer_context:
+        if any(t in lowered for t in NEGATIVE_TERMS) and any(t in lowered for t in COMMUNICATION_TERMS):
             return True
     return False
+
+
+_GENERIC_NAME_WORDS = frozenset({"the", "limited", "ltd", "pvt", "private", "llp", "company", "co", "inc"})
+
+
+def mentions_company(result: dict, company_name: str) -> bool:
+    """Whether a search result is about this company: its first two
+    distinctive name words appear in the title, text or URL. Review sites
+    return other companies' pages for the same query (live: Marathon Realty
+    and Kalpataru for an Adani Realty / Rustomjee search).
+    """
+    words = [w for w in re.findall(r"[a-z0-9]+", company_name.lower()) if w not in _GENERIC_NAME_WORDS]
+    if not words:
+        return False
+    key = " ".join(words[:2])
+    haystack = " ".join(
+        str(result.get(field) or "") for field in ("title", "content", "url")
+    ).lower()
+    return key in " ".join(re.findall(r"[a-z0-9]+", haystack))
 
 
 def retrieve_evidence_for_company(
@@ -79,15 +104,26 @@ def retrieve_evidence_for_company(
         if category in already_covered:
             continue
         query = query_template.format(company=company_name)
+        is_pain_point = category == PAIN_POINT_CATEGORY
         try:
-            results = tavily_search(
-                query, max_results=RESULTS_PER_CATEGORY, time_range="year", include_answer=False
-            )
+            if is_pain_point:
+                # no time_range: review pages accumulate complaints over years;
+                # each item keeps its source date for the reviewer to judge
+                results = tavily_search(
+                    query,
+                    max_results=PAIN_POINT_RESULTS,
+                    include_domains=PAIN_POINT_SITES,
+                    include_answer=False,
+                )
+            else:
+                results = tavily_search(
+                    query, max_results=RESULTS_PER_CATEGORY, time_range="year", include_answer=False
+                )
         except requests.exceptions.RequestException:
             continue
         for r in results:
             content = r.get("content", "")
-            if category == "direct_pain_point" and not _is_genuine_pain_point(content):
+            if is_pain_point and not (mentions_company(r, company_name) and _is_genuine_pain_point(content)):
                 continue
             cursor = conn.execute(
                 """

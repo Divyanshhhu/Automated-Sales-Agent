@@ -140,6 +140,29 @@ def test_csv_download(client: TestClient, web_profile: Profile, memo_ids: dict[s
     assert alpha["review_notes"] == "'=cmd|calc"  # formula neutralized for Excel
 
 
+def test_memo_page_explains_signal(client: TestClient, memo_ids: dict[str, int]) -> None:
+    page = client.get(f"/memos/{memo_ids['alpha']}").text
+    assert "Why this signal:" in page
+    assert "general signals only" in page
+
+
+def test_saving_profile_relabels_memo_signals(
+    client: TestClient, web_profile: Profile, memo_ids: dict[str, int]
+) -> None:
+    from src.web.forms import config_to_form
+
+    form = {**config_to_form(web_profile.config), "name": web_profile.name,
+            "signals.likely_need_phrases": "3 towers"}  # alpha's cited evidence: "Launched <b>3</b> towers"
+    assert get_memo(memo_ids["alpha"]).signal_confidence == LABELS["plausible"]
+    client.post(f"/profiles/{web_profile.id}", data=form)
+    # the cited text is "<b>3</b> towers", so the phrase "3 towers" doesn't match
+    assert get_memo(memo_ids["alpha"]).signal_confidence == LABELS["plausible"]
+
+    form["signals.likely_need_phrases"] = "towers"
+    client.post(f"/profiles/{web_profile.id}", data=form)
+    assert get_memo(memo_ids["alpha"]).signal_confidence == LABELS["likely"]
+
+
 def test_missing_memo_is_404(client: TestClient) -> None:
     assert client.get("/memos/999").status_code == 404
     assert client.post("/memos/999/regenerate").status_code == 404

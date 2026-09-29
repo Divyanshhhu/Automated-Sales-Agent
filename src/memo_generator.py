@@ -45,6 +45,8 @@ sentence [NO_EVIDENCE]. Every sentence must end in exactly one of: an [E<id>] ci
 - Do NOT invent facts, numbers, dates, or people not present in the evidence. If there \
 is not enough evidence to say anything specific, say so plainly.
 - Do NOT name or guess at a specific decision-maker's name. Only refer to roles.
+- If any evidence shows customers complaining about slow or missing responses or \
+follow-up, cite it: it is the most direct sign the product is needed.
 - Output ONLY valid JSON: {"why_relevant": "...", "potential_use_case": "..."}
 """
 
@@ -106,7 +108,9 @@ class MemoContent:
         return "needs_review" if self.issues else "pending"
 
 
-def write_memo(product: dict, company_row, evidence_items: list[dict]) -> MemoContent:
+def write_memo(
+    product: dict, company_row, evidence_items: list[dict], likely_need_phrases: list[str] | None = None
+) -> MemoContent:
     """Calls the model, then checks every citation deterministically."""
     valid_ids = {e["id"] for e in evidence_items}
     result = _call_llm(product, company_row, evidence_items)
@@ -127,19 +131,25 @@ def write_memo(product: dict, company_row, evidence_items: list[dict]) -> MemoCo
         why_relevant=texts["why_relevant"],
         potential_use_case=texts["potential_use_case"],
         issues=all_issues,
-        signal_confidence=assign_confidence(cited_evidence),
+        signal_confidence=assign_confidence(cited_evidence, likely_need_phrases),
         evidence_ids=sorted(valid_ids),
     )
 
 
 def build_memo(
-    product: dict, company_row, evidence_items: list[dict], *, profile_id: int, run_id: int | None
+    product: dict,
+    company_row,
+    evidence_items: list[dict],
+    *,
+    profile_id: int,
+    run_id: int | None,
+    likely_need_phrases: list[str] | None = None,
 ) -> dict:
     """Writes a memo and stores it. company_row must carry the profile's
     icp_fit_score / icp_fit_label (the pipeline joins them in from
     company_scores); they're snapshotted onto the memo.
     """
-    memo = write_memo(product, company_row, evidence_items)
+    memo = write_memo(product, company_row, evidence_items, likely_need_phrases)
 
     conn = get_connection()
     cursor = conn.execute(

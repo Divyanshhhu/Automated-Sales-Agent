@@ -64,6 +64,7 @@ from ..review import (
     get_memo,
     list_memos,
     next_memo_to_review,
+    refresh_signals,
     regenerate_memo,
     set_review,
     status_counts,
@@ -211,6 +212,8 @@ def create_app(*, allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS) -> Fas
             except (InvalidProfileNameError, ProfileExistsError) as exc:
                 errors = {"name": [str(exc)]}
             else:
+                # signal rules may have changed: keep existing memos' labels consistent
+                refresh_signals(profile.id)
                 return RedirectResponse(f"/profiles?saved={profile.id}", status_code=303)
         return render_profile_form(
             request, profile_id=profile_id, name=name, values=form, errors=errors, status_code=422

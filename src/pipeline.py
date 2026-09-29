@@ -7,6 +7,7 @@ so a crashed or interrupted run is visible rather than silently missing.
 """
 import logging
 
+from .config import likely_need_phrases
 from .db import get_connection
 from .discovery import discover_companies, store_companies
 from .evidence import get_evidence_for_company, retrieve_evidence_for_company
@@ -126,7 +127,10 @@ def run_pipeline(profile: Profile, discover_limit: int = 25, *, run_id: int | No
         for row in qualifying:
             evidence_items = get_evidence_for_company(profile.id, row["id"])
             try:
-                memo = build_memo(product, row, evidence_items, profile_id=profile.id, run_id=run_id)
+                memo = build_memo(
+                    product, row, evidence_items, profile_id=profile.id, run_id=run_id,
+                    likely_need_phrases=likely_need_phrases(config),
+                )
             except Exception:
                 stats["memos_failed"] += 1
                 checkpoint("memos")

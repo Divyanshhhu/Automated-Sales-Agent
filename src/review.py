@@ -8,7 +8,8 @@ it was made.
 import json
 from dataclasses import dataclass
 
-from .confidence import LABELS
+from .confidence import LABELS, LEVEL_ORDER, SignalAssessment, assess_signal
+from .config import likely_need_phrases
 from .db import get_connection, utc_now
 from .evidence import get_evidence_for_company
 from .memo_generator import extract_cited_evidence_ids, write_memo
@@ -23,11 +24,13 @@ STATUS_FILTERS: dict[str, tuple[str, ...]] = {
     "rejected": ("rejected",),
     "all": ("pending", "needs_review", "approved", "rejected"),
 }
-CONFIDENCE_FILTERS = {key: LABELS[key] for key in ("strong", "plausible", "weak")}
+CONFIDENCE_FILTERS = {key: LABELS[key] for key in LEVEL_ORDER}
 
+# strongest signal first; labels are constants, never user input
 _CONFIDENCE_RANK = (
-    f"CASE m.signal_confidence WHEN '{LABELS['strong']}' THEN 0 "
-    f"WHEN '{LABELS['plausible']}' THEN 1 ELSE 2 END"
+    "CASE m.signal_confidence "
+    + " ".join(f"WHEN '{LABELS[key]}' THEN {rank}" for rank, key in enumerate(LEVEL_ORDER))
+    + f" ELSE {len(LEVEL_ORDER)} END"
 )
 # Whitelisted ORDER BY clauses -- user input only ever selects a key.
 SORTS = {
@@ -77,6 +80,7 @@ class MemoDetail:
     reviewed_at: str | None
     generated_at: str | None
     evidence: list[dict]  # each item gains "cited": bool
+    signal: SignalAssessment  # recomputed with the profile's current rules, with the reason
 
     @property
     def evidence_ids(self) -> set[int]:
@@ -148,7 +152,7 @@ def get_memo(memo_id: int) -> MemoDetail:
     try:
         row = conn.execute(
             """
-            SELECT m.*, p.name AS profile_name, s.score AS current_score, s.breakdown_json,
+            SELECT m.*, p.name AS profile_name, p.config_json, s.score AS current_score, s.breakdown_json,
                    c.name AS company_name, c.domain, c.employee_count, c.city, c.state, c.country,
                    c.short_description
             FROM memos m
@@ -167,12 +171,20 @@ def get_memo(memo_id: int) -> MemoDetail:
     why, use_case = row["why_relevant_text"] or "", row["potential_use_case_text"] or ""
     cited = extract_cited_evidence_ids(why) | extract_cited_evidence_ids(use_case)
     shown_ids = set(json.loads(row["evidence_ids_json"])) if row["evidence_ids_json"] else None
+    all_evidence = get_evidence_for_company(row["profile_id"], row["company_id"])
     evidence = [
         {**e, "cited": e["id"] in cited}
-        for e in get_evidence_for_company(row["profile_id"], row["company_id"])
+        for e in all_evidence
         # only what the model was shown for this memo (older memos: everything)
         if shown_ids is None or e["id"] in shown_ids
     ]
+    signal = assess_signal(
+        [e for e in all_evidence if e["id"] in cited],
+        likely_need_phrases(json.loads(row["config_json"])),
+        # includes evidence fetched after the memo was written, so the
+        # explanation can point out a stronger item worth regenerating for
+        uncited_evidence=[e for e in all_evidence if e["id"] not in cited],
+    )
     return MemoDetail(
         id=row["id"],
         profile_id=row["profile_id"],
@@ -200,7 +212,32 @@ def get_memo(memo_id: int) -> MemoDetail:
         reviewed_at=row["reviewed_at"],
         generated_at=row["generated_at"],
         evidence=evidence,
+        signal=signal,
     )
+
+
+def refresh_signals(profile_id: int) -> int:
+    """Re-derives every memo's signal label for a profile -- after its
+    signal rules (e.g. likely-need phrases) change. No LLM call: the label
+    depends only on what each memo already cites. Returns how many changed.
+    """
+    conn = get_connection()
+    try:
+        memo_ids = [r["id"] for r in conn.execute("SELECT id FROM memos WHERE profile_id=?", (profile_id,))]
+    finally:
+        conn.close()
+    changed = 0
+    for memo_id in memo_ids:
+        memo = get_memo(memo_id)
+        if memo.signal.label != memo.signal_confidence:
+            conn = get_connection()
+            try:
+                conn.execute("UPDATE memos SET signal_confidence=? WHERE id=?", (memo.signal.label, memo_id))
+                conn.commit()
+            finally:
+                conn.close()
+            changed += 1
+    return changed
 
 
 def set_review(memo_id: int, decision: str, notes: str = "") -> str:
@@ -259,7 +296,9 @@ def regenerate_memo(memo_id: int) -> MemoDetail:
         conn.close()
     evidence_items = get_evidence_for_company(memo.profile_id, memo.company["id"])
 
-    content = write_memo(profile.config["product"], company_row, evidence_items)
+    content = write_memo(
+        profile.config["product"], company_row, evidence_items, likely_need_phrases(profile.config)
+    )
 
     conn = get_connection()
     try:

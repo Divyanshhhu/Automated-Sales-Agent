@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from src.config import ConfigError, load_config, validate_config
+from src.config import ConfigError, likely_need_phrases, load_config, validate_config
 
 
 def test_valid_config_passes(valid_config: dict) -> None:
@@ -92,6 +92,22 @@ def test_outreach_section_is_optional_and_may_be_empty(valid_config: dict) -> No
 def test_bad_outreach_section(valid_config: dict, outreach: object, fragment: str) -> None:
     valid_config["outreach"] = outreach
     with pytest.raises(ConfigError, match=fragment):
+        validate_config(valid_config)
+
+
+def test_signals_section(valid_config: dict) -> None:
+    valid_config["signals"] = {"likely_need_phrases": ["telecaller", "click-to-whatsapp"]}
+    validate_config(valid_config)
+    assert likely_need_phrases(valid_config) == ["telecaller", "click-to-whatsapp"]
+    assert likely_need_phrases({}) == []
+
+
+@pytest.mark.parametrize(
+    "signals", [{"likely_need_phrases": "telecaller"}, {"likely_need_phrases": [""]}, []]
+)
+def test_bad_signals_section(valid_config: dict, signals: object) -> None:
+    valid_config["signals"] = signals
+    with pytest.raises(ConfigError, match="signals"):
         validate_config(valid_config)
 
 

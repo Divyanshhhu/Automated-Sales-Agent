@@ -47,7 +47,8 @@ def test_no_evidence_tag_is_valid() -> None:
     ],
 )
 def test_assign_confidence(categories: set[str], expected: str) -> None:
-    assert assign_confidence([{"category": c} for c in categories]) == expected
+    items = [{"id": i, "category": c, "fact_text": ""} for i, c in enumerate(sorted(categories))]
+    assert assign_confidence(items) == expected
 
 
 def test_build_memo_confidence_uses_only_cited_evidence(

@@ -22,6 +22,19 @@ def test_empty_outreach_is_not_added_to_a_profile_without_one() -> None:
     assert "outreach" not in config
 
 
+def test_likely_need_phrases_field() -> None:
+    base = {k: v for k, v in copy.deepcopy(STARTER).items() if k != "signals"}
+    form = config_to_form(base)
+    assert form["signals.likely_need_phrases"] == ""
+    config, _ = form_to_config(form, base)
+    assert "signals" not in config  # left empty: not added
+
+    form["signals.likely_need_phrases"] = "telecaller\n\n click-to-whatsapp "
+    config, errors = form_to_config(form, base)
+    assert errors == {}
+    assert config["signals"] == {"likely_need_phrases": ["telecaller", "click-to-whatsapp"]}
+
+
 def test_outreach_roundtrip_keeps_multiline_signature() -> None:
     base = {**copy.deepcopy(STARTER), "outreach": {
         "sender_name": "Divyanshu", "signature": "Divyanshu\nFounder", "cta_label": "", "cta_url": "https://cal.com/x",

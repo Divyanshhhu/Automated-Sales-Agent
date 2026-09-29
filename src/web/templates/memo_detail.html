@@ -23,8 +23,9 @@
     <div class="card">
       <div class="memo-meta">
         <span class="badge badge-{{ memo.review_status }}">{{ memo.review_status | replace("_", " ") }}</span>
-        <span>{{ memo.signal_confidence or "" }}</span>
+        <span>{{ memo.signal.label }}</span>
       </div>
+      <p class="signal-reason small"><strong>Why this signal:</strong> {{ memo.signal.reason }}</p>
       <h2>Why this company is relevant</h2>
       <p class="memo-text">{{ memo.why_relevant | cited(ids) }}</p>
       <h2>Potential use case</h2>
