@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Runs{% endblock %}
+{% block content %}
+<h1>Runs</h1>
+
+<div class="card">
+  <h2>Start a run</h2>
+  {% if error %}
+    <div class="notice notice-error" role="alert">{{ error }}</div>
+  {% endif %}
+  {% if profiles %}
+  <form class="inline-form" method="post" action="/runs">
+    <div class="field">
+      <label for="profile_id">Profile</label>
+      <select id="profile_id" name="profile_id" required>
+        {% for p in profiles %}
+          <option value="{{ p.id }}" {% if p.id == selected_profile_id %}selected{% endif %}>{{ p.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="limit">Max companies</label>
+      <input id="limit" type="number" name="limit" min="1" max="{{ max_limit }}" value="{{ limit }}" required>
+    </div>
+    <button class="btn btn-primary" type="submit">Start run</button>
+  </form>
+  <p class="help muted">A run spends API credits: about 5 Tavily searches and one OpenAI call per qualifying company.</p>
+  {% else %}
+    <p class="empty">Create a <a href="/profiles/new">profile</a> first.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>History</h2>
+  {% if runs %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Profile</th>
+          <th>Status</th>
+          <th>Started (UTC)</th>
+          <th class="num">Found</th>
+          <th class="num">Qualified</th>
+          <th class="num">Memos</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in runs %}
+        <tr>
+          <td><a href="/runs/{{ r.id }}">{{ r.id }}</a></td>
+          <td>{{ r.profile_name }}</td>
+          <td><span class="badge badge-{{ r.status }}">{{ r.status }}</span></td>
+          <td class="muted">{{ r.started_at[:16] | replace("T", " ") }}</td>
+          <td class="num">{{ r.stats.get("discovered", "–") }}</td>
+          <td class="num">{{ r.stats.get("qualifying", "–") }}</td>
+          <td class="num">{{ r.stats.get("memos_generated", "–") }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="empty">No runs yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

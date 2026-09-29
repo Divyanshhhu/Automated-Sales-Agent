@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}{{ "Edit " ~ name if profile_id else "New profile" }}{% endblock %}
+
+{% macro field_errors(key) %}
+  {% if errors.get(key) %}
+    <ul class="errors">{% for e in errors[key] %}<li>{{ e }}</li>{% endfor %}</ul>
+  {% endif %}
+{% endmacro %}
+
+{% macro text_field(key, label, help) %}
+  <div class="field {% if errors.get(key) %}has-error{% endif %}">
+    <label for="{{ key }}">{{ label }}</label>
+    {% if help %}<p class="help">{{ help }}</p>{% endif %}
+    <input id="{{ key }}" type="text" name="{{ key }}" value="{{ values.get(key, '') }}">
+    {{ field_errors(key) }}
+  </div>
+{% endmacro %}
+
+{% macro area_field(key, label, help, cls="") %}
+  <div class="field {% if errors.get(key) %}has-error{% endif %}">
+    <label for="{{ key }}">{{ label }}</label>
+    {% if help %}<p class="help">{{ help }}</p>{% endif %}
+    <textarea id="{{ key }}" name="{{ key }}" class="{{ cls }}">{{ values.get(key, '') }}</textarea>
+    {{ field_errors(key) }}
+  </div>
+{% endmacro %}
+
+{% block content %}
+<h1>{{ "Edit profile" if profile_id else "New profile" }}</h1>
+
+{% if errors %}
+  <div class="notice notice-error" role="alert">Please fix the highlighted fields below.</div>
+  {% if errors.get(form_error) %}
+    <ul class="errors">{% for e in errors[form_error] %}<li>{{ e }}</li>{% endfor %}</ul>
+  {% endif %}
+{% endif %}
+
+<form method="post" action="{{ '/profiles/%d' % profile_id if profile_id else '/profiles' }}">
+  <div class="card">
+    <div class="field {% if errors.get('name') %}has-error{% endif %}">
+      <label for="name">Profile name</label>
+      <p class="help">e.g. "Mumbai mid-size developers". Each profile keeps its own scores and memos.</p>
+      <input id="name" type="text" name="name" value="{{ name }}" required maxlength="100">
+      {{ field_errors('name') }}
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Ideal customer</h2>
+    <p class="help muted">Each company is scored out of 100: size 30, location 40, industry 30.</p>
+    {{ area_field('icp.industry_keywords', 'Industry keywords',
+       'One per line. A company earns the 30 industry points if its description contains any of these.') }}
+
+    <div class="field {% if errors.get('icp.employee_range') %}has-error{% endif %}">
+      <label>Employee range</label>
+      <p class="help">30 size points inside the range; 15 if the count is unknown or only slightly outside it.</p>
+      <div class="field-row">
+        <input aria-label="Minimum employees" type="number" min="0" name="icp.employee_min"
+               value="{{ values.get('icp.employee_min', '') }}" placeholder="Min">
+        <input aria-label="Maximum employees" type="number" min="0" name="icp.employee_max"
+               value="{{ values.get('icp.employee_max', '') }}" placeholder="Max">
+      </div>
+      {{ field_errors('icp.employee_range') }}
+    </div>
+
+    {{ area_field('icp.geographies', 'Locations',
+       'One per line. 40 location points if the headquarters city or country matches. Including a country (e.g. "India") matches every company in it.') }}
+
+    <div class="field {% if errors.get('icp.min_icp_fit_score') %}has-error{% endif %}">
+      <label for="icp.min_icp_fit_score">Minimum score</label>
+      <p class="help">Companies scoring at least this are researched and get a memo. Leave empty for the default (50).</p>
+      <input id="icp.min_icp_fit_score" type="number" min="0" max="100" step="any" name="icp.min_icp_fit_score"
+             value="{{ values.get('icp.min_icp_fit_score', '') }}">
+      {{ field_errors('icp.min_icp_fit_score') }}
+    </div>
+
+    {{ area_field('icp.roles', 'Roles to contact',
+       'One per line. Outreach drafts will be addressed to these roles.') }}
+    {{ area_field('icp.industries', 'Industries (for your reference)',
+       'One per line. Not used in scoring — the keywords above are.') }}
+  </div>
+
+  <div class="card">
+    <h2>Product</h2>
+    <p class="help muted">The memo writer uses the name, description, problem and differentiators to explain why each company is a fit.</p>
+    {{ text_field('product.name', 'Product name', '') }}
+    {{ area_field('product.description', 'Description', '') }}
+    {{ area_field('product.problem_solved', 'Problem it solves', '') }}
+    {{ area_field('product.differentiators', 'Differentiators', 'One per line.') }}
+    {{ text_field('product.pricing', 'Pricing (for your reference)', 'Not used by the pipeline yet.') }}
+    {{ area_field('product.competitors', 'Competitors (for your reference)', 'One per line. Not used by the pipeline yet.') }}
+  </div>
+
+  <div class="card">
+    <h2>Evidence searches</h2>
+    {{ area_field('signal_taxonomy', 'Search queries',
+       'One per line as "category_name: query". {company} is replaced with the company name. Only the direct_pain_point category can produce a 🟢 Strong signal.',
+       'tall') }}
+  </div>
+
+  <div class="actions">
+    <button class="btn btn-primary" type="submit">Save profile</button>
+    <a class="btn" href="/profiles">Cancel</a>
+  </div>
+</form>
+{% endblock %}

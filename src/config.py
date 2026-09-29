@@ -9,7 +9,16 @@ from typing import Any
 
 
 class ConfigError(ValueError):
-    """Raised when product_profile.json is missing, unparseable, or invalid."""
+    """Raised when a config is missing, unparseable, or invalid.
+
+    `errors` lists each problem separately, each starting with the dotted
+    path of the offending field (e.g. "icp.employee_range must ..."), so a
+    form can show every message next to its own field.
+    """
+
+    def __init__(self, message: str, errors: list[str] | None = None) -> None:
+        super().__init__(message)
+        self.errors = errors or [message]
 
 
 def _check_str(section: dict, key: str, path: str, errors: list[str]) -> None:
@@ -92,7 +101,7 @@ def validate_config(config: Any) -> None:
     if "signal_taxonomy" in config:
         _validate_signal_taxonomy(config["signal_taxonomy"], errors)
     if errors:
-        raise ConfigError("Invalid config:\n  - " + "\n  - ".join(errors))
+        raise ConfigError("Invalid config:\n  - " + "\n  - ".join(errors), errors)
 
 
 def load_config(config_path: str) -> dict:

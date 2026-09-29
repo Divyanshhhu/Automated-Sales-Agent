@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Sales Agent{% endblock %} · Sales Agent</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/htmx.min.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="/profiles">Sales Agent</a>
+      <nav>
+        <a href="/profiles" {% if request.url.path.startswith('/profiles') %}aria-current="page"{% endif %}>Profiles</a>
+        <a href="/runs" {% if request.url.path.startswith('/runs') %}aria-current="page"{% endif %}>Runs</a>
+      </nav>
+    </div>
+  </header>
+  <main class="wrap">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

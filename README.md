@@ -26,8 +26,12 @@ of `product_profile.json` that lists every problem at once.
 database, with ICP scores (including a per-criterion breakdown), evidence and
 memos kept per profile so profiles never overwrite each other's results.
 Every pipeline run is recorded with a snapshot of the config it used. The
-database schema upgrades itself through versioned migrations. Next: the
-review UI (Milestones 2-4).
+database schema upgrades itself through versioned migrations.
+
+**Phase 2, Milestone 2 (done):** a local web UI for creating, editing,
+duplicating, importing and exporting profiles, and for starting runs and
+watching their progress live. Next: memo review (Milestone 3) and outreach
+drafts (Milestone 4).
 
 ## How it works
 
@@ -89,6 +93,21 @@ Fill in `.env` with your own keys:
 | `TAVILY_API_KEY` | Evidence retrieval | Free tier: 1,000 credits/month. Stays on Tavily — better fit for research-style per-signal queries than for company discovery. |
 
 ## Running it
+
+### Web UI
+
+```
+.\.venv\Scripts\python.exe run.py serve
+```
+
+Then open http://127.0.0.1:8000. The UI only listens on your own machine
+(127.0.0.1) and has no login, so it isn't reachable from other devices. It
+also refuses form submissions coming from other websites, so a page you
+visit can't start a run (and spend API credits) behind your back. Only one
+run executes at a time; a run interrupted by stopping the server is marked
+failed the next time it starts.
+
+### Command line
 
 Settings live in named **profiles** (product + ICP + signal queries). The
 JSON file format is how profiles are imported and exported:
@@ -158,6 +177,10 @@ src/
   db.py               SQLite connection + versioned schema migrations
   profiles.py         Named profiles stored in the database
   runs.py             Pipeline run records (status, stats, config snapshot)
+  web/                Local web UI (FastAPI + Jinja2 templates + htmx)
+    app.py            Routes + local-only safety checks
+    forms.py          Profile form <-> config conversion, per-field errors
+    runner.py         Background run thread (one at a time)
   discovery.py         Exa company search + firmographics, with noise filters
   exa_client.py        Shared Exa search client
   tavily_client.py      Shared Tavily search client
@@ -168,7 +191,7 @@ src/
   export.py            CSV export
   pipeline.py          Orchestrates one run for one profile
   retry.py             Shared retry-with-backoff for all external calls
-run.py                 CLI: run, profiles, import-profile, export-profile
+run.py                 CLI: serve, run, profiles, import-profile, export-profile
 tests/                 Offline pytest suite (APIs faked, temp DB)
 pyproject.toml         pytest / ruff / mypy configuration
 ```
@@ -180,8 +203,9 @@ pyproject.toml         pytest / ruff / mypy configuration
 - **Phase 2** (in progress): profiles editable in a local web UI (FastAPI +
   htmx), review UI backed by the database instead of CSV, grounded email
   outreach drafts from approved memos with one configurable call-to-action
-  link (human still sends). Milestone 1 (profiles in the database, per-profile
-  results, run tracking) is done.
+  link (human still sends). Milestones 1 (profiles in the database,
+  per-profile results, run tracking) and 2 (web UI for profiles and runs)
+  are done.
 - **Phase 3**: decision-maker/contact enrichment; reply classification;
   unified-context integration with the existing WhatsApp/voice sales agent.
 - **Phase 4**: automated sending with guardrails, broader signal sources,

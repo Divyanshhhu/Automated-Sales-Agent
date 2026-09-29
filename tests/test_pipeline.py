@@ -158,6 +158,19 @@ def test_crashed_run_is_marked_failed(
     assert run.finished_at is not None
 
 
+def test_executes_a_run_created_as_queued(temp_db: Path, fake_apis: dict) -> None:
+    from src.runs import create_run
+
+    profile = _profile_with_range("Mid-size", [51, 2000])
+    run_id = create_run(profile, 5, status="queued")
+    assert run_pipeline(profile, 5, run_id=run_id) == run_id
+
+    run = get_run(run_id)
+    assert run.status == "succeeded"
+    assert run.stats["stage"] == "done"
+    assert run.stats["evidence_done"] == run.stats["qualifying"] == 1
+
+
 def test_run_keeps_config_snapshot_after_profile_edit(temp_db: Path, fake_apis: dict) -> None:
     from src.profiles import update_profile
 

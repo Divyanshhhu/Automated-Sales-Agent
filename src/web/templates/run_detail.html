@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Run {{ run.id }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Run {{ run.id }} · {{ run.profile_name }}</h1>
+  <a class="btn" href="/runs">All runs</a>
+</div>
+<div class="card">
+  {% include "_run_status.html" %}
+</div>
+{% endblock %}

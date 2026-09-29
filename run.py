@@ -5,6 +5,7 @@ Usage:
     python run.py profiles
     python run.py import-profile PATH --name NAME [--replace]
     python run.py export-profile NAME PATH
+    python run.py serve [--port 8000]
 
 Example (first time):
     python run.py import-profile config/product_profile.json --name Default
@@ -91,6 +92,17 @@ def cmd_export_profile(args: argparse.Namespace) -> None:
     print(f"Exported profile {profile.name!r} to {args.path}.")
 
 
+def cmd_serve(args: argparse.Namespace) -> None:
+    import uvicorn
+
+    from src.web.app import create_app
+
+    # Always 127.0.0.1: the UI has no login, so it must not be reachable from
+    # other machines on the network.
+    print(f"Open http://127.0.0.1:{args.port} in your browser (Ctrl+C to stop).")
+    uvicorn.run(create_app(), host="127.0.0.1", port=args.port, log_level="info")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="AI sales prospect research pipeline")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -113,6 +125,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_export.add_argument("name")
     p_export.add_argument("path")
     p_export.set_defaults(func=cmd_export_profile)
+
+    p_serve = sub.add_parser("serve", help="start the local web UI")
+    p_serve.add_argument("--port", type=_positive_int, default=8000)
+    p_serve.set_defaults(func=cmd_serve)
     return parser
 
 

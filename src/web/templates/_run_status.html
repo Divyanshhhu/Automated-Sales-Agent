@@ -1,0 +1,42 @@
+{% set steps = [("discovering", "Discover"), ("scoring", "Score"), ("evidence", "Evidence"), ("memos", "Memos"), ("exporting", "Export")] %}
+{% set stage = run.stats.get("stage") %}
+{% set stage_keys = steps | map(attribute=0) | list %}
+{% set current = stage_keys.index(stage) if stage in stage_keys else (stage_keys | length if run.status == "succeeded" else -1) %}
+<div id="run-status"
+     {% if run.is_active %}hx-get="/runs/{{ run.id }}/status" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <p>
+    <span class="badge badge-{{ run.status }}">{{ run.status }}</span>
+    <span class="muted">limit {{ run.discover_limit }} · started {{ run.started_at[:19] | replace("T", " ") }} UTC
+    {% if run.finished_at %} · finished {{ run.finished_at[:19] | replace("T", " ") }} UTC{% endif %}</span>
+  </p>
+
+  <ol class="steps" aria-label="Progress">
+    {% for key, label in steps %}
+      <li class="{% if loop.index0 < current %}done{% elif loop.index0 == current and run.is_active %}current{% endif %}">{{ label }}</li>
+    {% endfor %}
+  </ol>
+
+  {% set s = run.stats %}
+  <dl class="stats">
+    <div><dt>Companies found</dt><dd>{{ s.get("discovered", "–") }}</dd></div>
+    <div><dt>Qualified</dt><dd>{{ s.get("qualifying", "–") }}</dd></div>
+    <div><dt>Researched</dt><dd>
+      {%- if "qualifying" in s -%}
+        {#- runs from before progress tracking have no evidence_done; if they got past evidence, all were done -#}
+        {{ s.get("evidence_done", s.qualifying if "evidence_added" in s else 0) }} / {{ s.qualifying }}
+      {%- else -%}–{%- endif -%}
+    </dd></div>
+    <div><dt>Memos written</dt><dd>{{ s.get("memos_generated", "–") }}</dd></div>
+    <div><dt>Memos failed</dt><dd>{{ s.get("memos_failed", "–") }}</dd></div>
+  </dl>
+
+  {% if run.error %}
+    <div class="notice notice-error" role="alert" style="margin-top: 16px">{{ run.error }}</div>
+  {% endif %}
+  {% if s.get("csv_path") %}
+    <p style="margin-top: 16px">CSV: <span class="path">{{ s.csv_path }}</span></p>
+  {% endif %}
+  {% if run.is_active %}
+    <p class="muted">Updating automatically…</p>
+  {% endif %}
+</div>
