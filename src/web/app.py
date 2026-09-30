@@ -16,7 +16,7 @@ import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -41,8 +41,11 @@ from ..outreach import (
 from ..profiles import (
     InvalidProfileNameError,
     ProfileExistsError,
+    ProfileInUseError,
     ProfileNotFoundError,
     create_profile,
+    delete_profile,
+    deletion_summary,
     get_profile,
     list_profiles,
     update_profile,
@@ -204,6 +207,38 @@ def create_app(*, allowed_hosts: tuple[str, ...] = DEFAULT_ALLOWED_HOSTS) -> Fas
     async def update_profile_route(request: Request, profile_id: int) -> Response:
         get_profile(profile_id)  # 404 before reading the form
         return await save_profile_from_form(request, profile_id)
+
+    def render_delete(
+        request: Request, profile_id: int, *, error: str | None = None, status_code: int = 200
+    ) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "profile_delete.html",
+            {"profile": get_profile(profile_id), "summary": deletion_summary(profile_id), "error": error},
+            status_code=status_code,
+        )
+
+    @app.get("/profiles/{profile_id:int}/delete", response_class=HTMLResponse)
+    def delete_profile_page(request: Request, profile_id: int) -> HTMLResponse:
+        return render_delete(request, profile_id)
+
+    @app.post("/profiles/{profile_id:int}/delete")
+    async def delete_profile_route(request: Request, profile_id: int) -> Response:
+        profile = get_profile(profile_id)
+        typed = str((await request.form()).get("confirm_name", "")).strip()
+        if typed != profile.name:
+            return render_delete(
+                request,
+                profile_id,
+                error="The name you typed doesn't match — nothing was deleted.",
+                status_code=422,
+            )
+        try:
+            delete_profile(profile_id)
+        except ProfileInUseError as exc:
+            return render_delete(request, profile_id, error=str(exc), status_code=409)
+        logger.info("Deleted campaign %r (id %d)", profile.name, profile_id)
+        return RedirectResponse(f"/profiles?deleted={quote(profile.name)}", status_code=303)
 
     @app.post("/profiles/{profile_id:int}/duplicate")
     def duplicate_profile(profile_id: int) -> RedirectResponse:

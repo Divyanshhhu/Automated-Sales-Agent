@@ -5,6 +5,7 @@ Usage:
     python run.py profiles
     python run.py import-profile PATH --name NAME [--replace]
     python run.py export-profile NAME PATH
+    python run.py delete-profile NAME
     python run.py serve [--port 8000]
 
 Example (first time):
@@ -34,8 +35,11 @@ from src.pipeline import run_pipeline  # noqa: E402
 from src.profiles import (  # noqa: E402
     InvalidProfileNameError,
     ProfileExistsError,
+    ProfileInUseError,
     ProfileNotFoundError,
     create_profile,
+    delete_profile,
+    deletion_summary,
     get_profile_by_name,
     list_profiles,
     update_profile,
@@ -86,6 +90,19 @@ def cmd_import_profile(args: argparse.Namespace) -> None:
     print(f"Updated profile {profile.name!r} (id {profile.id}); {relabelled} memo signal(s) re-labelled.")
 
 
+def cmd_delete_profile(args: argparse.Namespace) -> None:
+    profile = get_profile_by_name(args.name)
+    s = deletion_summary(profile.id)
+    print(f"Deleting campaign {profile.name!r} removes: {s.researched_companies} researched companies, "
+          f"{s.scored_companies} fit scores, {s.evidence_items} sources, {s.email_drafts} email drafts, "
+          f"{s.searches} past searches. Companies, contacts and spending history are kept.")
+    typed = input("Type the campaign name to confirm: ").strip()
+    if typed != profile.name:
+        sys.exit("The name didn't match -- nothing was deleted.")
+    delete_profile(profile.id)
+    print(f"Deleted campaign {profile.name!r}.")
+
+
 def cmd_export_profile(args: argparse.Namespace) -> None:
     profile = get_profile_by_name(args.name)
     with open(args.path, "w", encoding="utf-8") as f:
@@ -128,6 +145,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_export.add_argument("path")
     p_export.set_defaults(func=cmd_export_profile)
 
+    p_delete = sub.add_parser("delete-profile", help="delete a campaign (asks you to type its name)")
+    p_delete.add_argument("name")
+    p_delete.set_defaults(func=cmd_delete_profile)
+
     p_serve = sub.add_parser("serve", help="start the local web UI")
     p_serve.add_argument("--port", type=_positive_int, default=8000)
     p_serve.set_defaults(func=cmd_serve)
@@ -138,7 +159,9 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     try:
         args.func(args)
-    except (ConfigError, ProfileNotFoundError, ProfileExistsError, InvalidProfileNameError) as exc:
+    except (
+        ConfigError, ProfileNotFoundError, ProfileExistsError, InvalidProfileNameError, ProfileInUseError
+    ) as exc:
         sys.exit(str(exc))
 
 

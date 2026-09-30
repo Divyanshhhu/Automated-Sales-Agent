@@ -125,3 +125,75 @@ def list_profiles() -> list[Profile]:
     finally:
         conn.close()
     return [_from_row(r) for r in rows]
+
+
+class ProfileInUseError(RuntimeError):
+    """A campaign can't be deleted while one of its searches is running."""
+
+
+@dataclass(frozen=True)
+class DeletionSummary:
+    """What deleting a campaign removes. Companies and the people found at
+    them are shared by every campaign, so they are kept; so is the cost
+    history, which just stops pointing at the campaign.
+    """
+
+    researched_companies: int
+    scored_companies: int
+    evidence_items: int
+    email_drafts: int
+    searches: int
+
+
+def deletion_summary(profile_id: int) -> DeletionSummary:
+    get_profile(profile_id)
+    conn = get_connection()
+    try:
+
+        def count(sql: str) -> int:
+            return conn.execute(sql, (profile_id,)).fetchone()[0]
+
+        return DeletionSummary(
+            researched_companies=count("SELECT COUNT(*) FROM memos WHERE profile_id=?"),
+            scored_companies=count("SELECT COUNT(*) FROM company_scores WHERE profile_id=?"),
+            evidence_items=count("SELECT COUNT(*) FROM evidence_items WHERE profile_id=?"),
+            email_drafts=count(
+                "SELECT COUNT(*) FROM outreach_drafts"
+                " WHERE memo_id IN (SELECT id FROM memos WHERE profile_id=?)"
+            ),
+            searches=count("SELECT COUNT(*) FROM runs WHERE profile_id=?"),
+        )
+    finally:
+        conn.close()
+
+
+def delete_profile(profile_id: int) -> None:
+    """Deletes the campaign and everything that belongs only to it, in one
+    transaction: all of it goes, or (on any error) none of it.
+    """
+    get_profile(profile_id)
+    conn = get_connection()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        active = conn.execute(
+            "SELECT COUNT(*) FROM runs WHERE profile_id=? AND status IN ('queued', 'running')", (profile_id,)
+        ).fetchone()[0]
+        if active:
+            raise ProfileInUseError("A search is running for this campaign; wait for it to finish first")
+        for sql in (
+            "DELETE FROM outreach_drafts WHERE memo_id IN (SELECT id FROM memos WHERE profile_id=?)",
+            "DELETE FROM memos WHERE profile_id=?",
+            "DELETE FROM evidence_items WHERE profile_id=?",
+            "DELETE FROM evidence_searches WHERE profile_id=?",
+            "DELETE FROM company_scores WHERE profile_id=?",
+            # api_usage rows keep their cost; their run/profile links become NULL (ON DELETE SET NULL)
+            "DELETE FROM runs WHERE profile_id=?",
+            "DELETE FROM profiles WHERE id=?",
+        ):
+            conn.execute(sql, (profile_id,))
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()

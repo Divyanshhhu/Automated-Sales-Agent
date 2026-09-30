@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Delete {{ profile.name }}{% endblock %}
+{% block content %}
+<p class="small muted" style="margin: 0 0 10px"><a href="/profiles">Campaigns</a> / {{ profile.name }}</p>
+<h1>Delete “{{ profile.name }}”?</h1>
+<p class="subhead">This can't be undone.</p>
+
+{% if error %}<div class="notice notice-error" role="alert">{{ error }}</div>{% endif %}
+
+<div class="card" style="max-width: 720px">
+  <h2>What will be deleted</h2>
+  <ul style="margin: 0 0 14px; padding-left: 20px; line-height: 1.8">
+    <li>The campaign's settings</li>
+    <li>{{ summary.researched_companies }} compan{{ "y's" if summary.researched_companies == 1 else "ies'" }} research and your decisions on them</li>
+    <li>{{ summary.scored_companies }} fit score{{ "s" if summary.scored_companies != 1 }} and {{ summary.evidence_items }} source{{ "s" if summary.evidence_items != 1 }}</li>
+    <li>{{ summary.email_drafts }} email draft{{ "s" if summary.email_drafts != 1 }}</li>
+    <li>{{ summary.searches }} past search{{ "es" if summary.searches != 1 }}</li>
+  </ul>
+  <h2>What stays</h2>
+  <ul style="margin: 0 0 20px; padding-left: 20px; line-height: 1.8">
+    <li>The companies and the people found at them — other campaigns can still use them</li>
+    <li>Your spending history, so this month's totals stay correct</li>
+  </ul>
+
+  <form method="post" action="/profiles/{{ profile.id }}/delete">
+    <div class="field">
+      <label for="confirm_name">Type <strong>{{ profile.name }}</strong> to confirm</label>
+      <input id="confirm_name" type="text" name="confirm_name" autocomplete="off" required maxlength="100">
+    </div>
+    <div class="actions">
+      <button class="btn btn-danger" type="submit">Delete campaign</button>
+      <a class="btn btn-quiet" href="/profiles">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

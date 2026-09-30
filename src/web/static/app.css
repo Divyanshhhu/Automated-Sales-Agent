@@ -81,6 +81,8 @@ code, .path { font-family: ui-monospace, Consolas, monospace; font-size: 13px; w
 .inset { background: var(--bg); border-radius: 10px; padding: 16px 18px; }
 
 .table-wrap { overflow-x: auto; }
+/* tables with dropdown menus must not clip them */
+.table-wrap-menus { overflow: visible; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
 th { font-size: 13px; color: var(--muted); font-weight: 600; }
@@ -104,6 +106,34 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .btn-small { padding: 6px 12px; min-height: 34px; font-size: 14px; }
 .btn-block { width: 100%; }
 .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.nowrap { white-space: nowrap; }
+input[type="file"] { font: inherit; font-size: 14px; color: var(--muted); }
+input[type="file"]::file-selector-button {
+  font: inherit; font-size: 14px; font-weight: 600; margin-right: 10px;
+  padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--text); cursor: pointer;
+}
+input[type="file"]::file-selector-button:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.menu { position: relative; }
+.menu summary { list-style: none; }
+.menu summary::-webkit-details-marker { display: none; }
+.menu-items {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 10; min-width: 190px;
+  display: grid; gap: 6px; padding: 8px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(23, 25, 28, 0.12);
+}
+.menu-items form { margin: 0; }
+/* each item is a full-width outlined button */
+.menu-items a, .menu-items button {
+  display: flex; align-items: center; justify-content: flex-start; gap: 8px; width: 100%;
+  font: inherit; font-size: 14px; font-weight: 600; white-space: nowrap;
+  min-height: 36px; padding: 7px 12px; border-radius: 8px;
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+  text-decoration: none; cursor: pointer;
+}
+.menu-items a:hover, .menu-items button:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.menu-items .danger { border-color: var(--danger); color: var(--danger); }
+.menu-items .danger:hover { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
 .actions form { margin: 0; }
 
 /* ---------- forms ---------- */

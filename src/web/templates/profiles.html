@@ -11,18 +11,20 @@
 
 {% if request.query_params.get('saved') %}
   <div class="notice notice-ok" role="status">Campaign saved.</div>
+{% elif request.query_params.get('deleted') %}
+  <div class="notice notice-ok" role="status">Campaign “{{ request.query_params.get('deleted') }}” deleted.</div>
 {% endif %}
 
 <div class="card">
   {% if profiles %}
-  <div class="table-wrap">
+  <div class="table-wrap table-wrap-menus">
     <table>
       <thead>
         <tr>
           <th>Name</th>
           <th>Locations</th>
           <th class="num">People</th>
-          <th class="num">Min fit</th>
+          <th class="num nowrap">Min fit</th>
           <th>Updated</th>
           <th></th>
         </tr>
@@ -31,20 +33,26 @@
         {% for p in profiles %}
         {% set icp = p.config.icp %}
         <tr>
-          <td><a href="/profiles/{{ p.id }}/edit">{{ p.name }}</a></td>
+          <td class="nowrap"><a href="/profiles/{{ p.id }}/edit">{{ p.name }}</a></td>
           <td>{{ icp.geographies | join(", ") }}</td>
-          <td class="num">{{ icp.employee_range[0] }}–{{ icp.employee_range[1] }}</td>
+          <td class="num nowrap">{{ "{:,}".format(icp.employee_range[0]) }}–{{ "{:,}".format(icp.employee_range[1]) }}</td>
           <td class="num">{{ icp.get("min_icp_fit_score", 50) }}</td>
-          <td class="muted">{{ p.updated_at[:10] }}</td>
+          <td class="muted nowrap">{{ p.updated_at[:10] }}</td>
           <td>
-            <div class="actions">
+            <div class="actions" style="flex-wrap: nowrap; justify-content: flex-end">
               <a class="btn btn-small btn-primary" href="/?campaign={{ p.id }}#find">Find leads</a>
               <a class="btn btn-small" href="/leads?campaign={{ p.id }}">Leads</a>
               <a class="btn btn-small" href="/profiles/{{ p.id }}/edit">Edit</a>
-              <form method="post" action="/profiles/{{ p.id }}/duplicate">
-                <button class="btn btn-small" type="submit">Duplicate</button>
-              </form>
-              <a class="btn btn-small" href="/profiles/{{ p.id }}/export">Export</a>
+              <details class="menu">
+                <summary class="btn btn-small btn-quiet" aria-label="More actions for {{ p.name }}">More ▾</summary>
+                <div class="menu-items">
+                  <form method="post" action="/profiles/{{ p.id }}/duplicate">
+                    <button type="submit">Duplicate</button>
+                  </form>
+                  <a href="/profiles/{{ p.id }}/export">Export as JSON</a>
+                  <a class="danger" href="/profiles/{{ p.id }}/delete">Delete…</a>
+                </div>
+              </details>
             </div>
           </td>
         </tr>

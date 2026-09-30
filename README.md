@@ -169,6 +169,7 @@ JSON file format is how profiles are imported and exported:
 .\.venv\Scripts\python.exe run.py profiles                                   # list profiles
 .\.venv\Scripts\python.exe run.py import-profile my.json --name Default --replace  # update one
 .\.venv\Scripts\python.exe run.py export-profile Default my.json             # save one to a file
+.\.venv\Scripts\python.exe run.py delete-profile "Default (copy)"      # delete one (asks you to type its name)
 ```
 
 `--limit` (in the UI: "New companies to find") caps how many *new*
