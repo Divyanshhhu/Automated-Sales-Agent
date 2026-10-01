@@ -7,10 +7,11 @@ not a raw contact list. Every claim in a memo is either cited to a specific
 retrieved source or explicitly tagged as inference, so a salesperson can
 trust the reasoning instead of guessing which parts are made up.
 
-Phase 1 is complete; Phase 2 is in progress (see **Roadmap** below). It is part of a larger planned system that will
-eventually connect to an existing AI WhatsApp sales/RM agent for real
-estate leads, carrying one unified conversation context from first research
-through outreach, qualification, and demo booking.
+Phases 1 and 2 are complete (see **Roadmap** below); the next step is real
+use. It is part of a larger planned system: a WhatsApp sales chatbot for
+real estate leads is being built as a separate project, and the two are
+meant to share one conversation history per lead, from first research
+through outreach, qualification, and site-visit booking.
 
 ## Status
 
@@ -73,6 +74,11 @@ read Clear / Likely / Possible need):
   Tavily credits, OpenAI tokens) against its search or action, so each
   search shows what it actually cost.
 
+**Campaign delete (done):** Campaigns › More › Delete, or
+`run.py delete-profile NAME`. A confirmation page lists exactly what goes
+and you type the campaign's name to confirm. Companies, the people found at
+them and your spending history are shared, so they're kept.
+
 ## How it works
 
 ```
@@ -113,13 +119,17 @@ profile (product + ICP, stored in the database; JSON import/export)
     companies are surfaced with the tag, never silently dropped.
         |
         v
-[6] CSV export, sorted by ICP Fit then Signal Confidence, for human
-    review -- no review UI in Phase 1 by design
+[6] Review in the web UI (Leads → the company page): approve or
+    reject, then find contacts and write grounded emails. A CSV of each
+    campaign's research is also saved after every search and can be
+    downloaded from Leads
 ```
 
-Only step [4] uses an LLM. Everything else is deterministic on purpose —
-finding and scoring companies doesn't require judgment, only synthesizing
-scattered evidence into a coherent argument does.
+In a search, only step [4] uses an LLM; the only other LLM use is writing
+an outreach email, which you ask for and approve. Everything else is
+deterministic on purpose — finding and scoring companies doesn't require
+judgment, only synthesizing scattered evidence into a coherent argument
+does.
 
 ## Setup
 
@@ -134,7 +144,7 @@ Fill in `.env` with your own keys:
 | Key | Used for | Notes |
 |---|---|---|
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | Memo generation | Defaults to `gpt-6-luna` (cost-efficient tier). `gpt-6-astra` (flagship) is available if quality needs outweigh cost. |
-| `EXA_API_KEY` | Discovery + company firmographics | Free tier: 20,000 requests/month. Chosen over Tavily for discovery because Exa's company search benchmarks meaningfully better on this task, and its `category="company"` results include structured company data — which replaced a separate Apollo enrichment step whose free-tier credits ran out. |
+| `EXA_API_KEY` | Discovery, company firmographics, people search | Chosen over Tavily for discovery because Exa's company search benchmarks meaningfully better on this task, and its `category="company"` results include structured company data — which replaced a separate Apollo enrichment step whose free-tier credits ran out. |
 | `TAVILY_API_KEY` | Evidence retrieval | Free tier: 1,000 credits/month. Stays on Tavily — better fit for research-style per-signal queries than for company discovery. |
 
 ## Running it
@@ -155,8 +165,9 @@ use Google Fonts when online and fall back to system fonts offline.
 
 ### Command line
 
-Settings live in named **profiles** (product + ICP + signal queries). The
-JSON file format is how profiles are imported and exported:
+Settings live in named **profiles** — what the web UI calls
+**campaigns** (product + ideal customer + research searches). You can create
+them in the UI, or import and export them as JSON files:
 
 ```
 # first time: create a profile from the JSON file
@@ -269,23 +280,25 @@ src/
   export.py            CSV export (file after each run, or UI download)
   pipeline.py          Orchestrates one run for one profile
   retry.py             Shared retry-with-backoff for all external calls
-run.py                 CLI: serve, run, profiles, import-profile, export-profile
+run.py                 CLI: serve, run, profiles, import-profile, export-profile, delete-profile
 tests/                 Offline pytest suite (APIs faked, temp DB)
 pyproject.toml         pytest / ruff / mypy configuration
 ```
 
 ## Roadmap
 
-- **Phase 1 (this)**: product + ICP -> discovered, scored, evidence-backed,
-  confidence-tagged research memos -> human review via CSV.
-- **Phase 2** (in progress): profiles editable in a local web UI (FastAPI +
-  htmx), review UI backed by the database instead of CSV, grounded email
-  outreach drafts from approved memos with one configurable call-to-action
-  link (human still sends). Milestones 1 (profiles in the database,
-  per-profile results, run tracking), 2 (web UI for profiles and runs),
-  3 (memo review UI) and 4 (people + outreach email drafts) are done.
-- **Phase 3**: email-address enrichment; reply classification;
-  unified-context integration with the existing WhatsApp/voice sales agent.
+- **Phase 1 (done)**: product + ICP -> discovered, scored, evidence-backed,
+  confidence-tagged research memos.
+- **Phase 2 (done)**: campaigns editable in a local web UI (FastAPI + htmx);
+  review in the UI instead of CSV; finding people at approved companies;
+  grounded email drafts with one configurable call-to-action link (a human
+  still sends); real cost tracking; the workflow-based redesign; campaign
+  delete.
+- **Next: real use.** Run a full batch, send real emails, measure replies —
+  and let that decide what comes next.
+- **Phase 3**: email-address enrichment; staged research to cut Tavily
+  costs; reply classification; shared lead history with the separate
+  WhatsApp sales chatbot.
 - **Phase 4**: automated sending with guardrails, broader signal sources,
   feedback loop from real conversion outcomes back into ICP/confidence
   weighting.
